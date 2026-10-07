@@ -1,0 +1,16 @@
+# Binaries
+bin/
+*.exe
+
+# Env (never commit secrets)
+.env
+!.env.example
+
+# Go
+*.out
+coverage.out
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
