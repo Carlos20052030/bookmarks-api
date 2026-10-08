@@ -4,8 +4,11 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/Carlos20052030/bookmarks-api/internal/config"
+	"github.com/Carlos20052030/bookmarks-api/internal/server"
 	"github.com/Carlos20052030/bookmarks-api/internal/storage"
 )
 
@@ -16,7 +19,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	db, err := storage.Open(ctx, cfg.Database.DSN())
 	if err != nil {
@@ -30,5 +34,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("api starting", "port", cfg.Server.Port)
+	srv := server.New(cfg.Server)
+	if err := srv.Run(ctx); err != nil {
+		slog.Error("server", "err", err)
+		os.Exit(1)
+	}
+
+	slog.Info("shutdown complete")
 }
