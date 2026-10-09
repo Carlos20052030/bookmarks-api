@@ -8,7 +8,8 @@ build:
 	go build -o bin/api ./cmd/api
 
 test:
-	go test ./...
+	set -a; . ./.env; set +a; \
+	POSTGRES_HOST=127.0.0.1 go test ./...
 
 lint:
 	golangci-lint run
