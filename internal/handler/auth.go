@@ -1,0 +1,160 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net/http"
+	"net/mail"
+	"strings"
+	"time"
+
+	"github.com/Carlos20052030/bookmarks-api/internal/auth"
+	"github.com/Carlos20052030/bookmarks-api/internal/domain"
+	"github.com/Carlos20052030/bookmarks-api/internal/storage"
+	"github.com/google/uuid"
+)
+
+const minPasswordLen = 8
+
+// Store is the subset of storage operations the auth handler needs.
+// Defined here so tests can provide a hand-written fake.
+type Store interface {
+	CreateUser(ctx context.Context, email, passwordHash string) (domain.User, error)
+	GetUserByEmail(ctx context.Context, email string) (domain.User, error)
+	CreateRefreshToken(ctx context.Context, userID uuid.UUID, tokenHash string, expiresAt time.Time) (domain.RefreshToken, error)
+	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (domain.RefreshToken, error)
+	RevokeRefreshToken(ctx context.Context, id uuid.UUID) error
+}
+
+// AuthHandler holds the dependencies for auth endpoints.
+type AuthHandler struct {
+	store     Store
+	jwtSecret []byte
+	logger    *slog.Logger
+}
+
+func NewAuthHandler(store Store, jwtSecret []byte, logger *slog.Logger) *AuthHandler {
+	return &AuthHandler{store: store, jwtSecret: jwtSecret, logger: logger}
+}
+
+// --- request / response types ---
+
+type registerRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type userResponse struct {
+	ID        uuid.UUID `json:"id"`
+	Email     string    `json:"email"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type authResponse struct {
+	User         userResponse `json:"user"`
+	AccessToken  string       `json:"access_token"`
+	RefreshToken string       `json:"refresh_token"`
+	TokenType    string       `json:"token_type"`
+	ExpiresIn    int          `json:"expires_in"`
+}
+
+// --- helpers ---
+
+// normalizeEmail lowercases and trims whitespace so that "Alice@X.com "
+// and "alice@x.com" resolve to the same account.
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// validEmail is a deliberately permissive check. The authoritative
+// validation happens when we later send a verification email; here we
+// only keep obvious garbage out of the database.
+func validEmail(email string) bool {
+	if len(email) > 254 {
+		return false
+	}
+	_, err := mail.ParseAddress(email)
+	return err == nil
+}
+
+// --- handlers ---
+
+// Register creates a user and immediately issues tokens so the client
+// does not need a second round-trip to /auth/login.
+func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+	var req registerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", "request body is not valid json")
+		return
+	}
+
+	email := normalizeEmail(req.Email)
+	if !validEmail(email) {
+		writeError(w, http.StatusBadRequest, "invalid_email", "email is malformed")
+		return
+	}
+	if len(req.Password) < minPasswordLen {
+		writeError(w, http.StatusBadRequest, "weak_password", "password must be at least 8 characters")
+		return
+	}
+
+	hash, err := auth.HashPassword(req.Password)
+	if err != nil {
+		h.logger.Error("hash password", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	user, err := h.store.CreateUser(r.Context(), email, hash)
+	if err != nil {
+		if errors.Is(err, storage.ErrEmailTaken) {
+			writeError(w, http.StatusConflict, "email_taken", "email already registered")
+			return
+		}
+		h.logger.Error("create user", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	accessToken, refreshToken, err := h.issueTokens(r.Context(), user.ID)
+	if err != nil {
+		h.logger.Error("issue tokens", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, authResponse{
+		User: userResponse{
+			ID:        user.ID,
+			Email:     user.Email,
+			CreatedAt: user.CreatedAt,
+		},
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    int(auth.AccessTokenTTL.Seconds()),
+	})
+}
+
+// issueTokens generates a signed access JWT and an opaque refresh token,
+// persisting only the hash of the latter.
+func (h *AuthHandler) issueTokens(ctx context.Context, userID uuid.UUID) (access, refresh string, err error) {
+	access, err = auth.IssueAccessToken(userID, h.jwtSecret)
+	if err != nil {
+		return "", "", err
+	}
+
+	plain, hash, err := auth.GenerateRefreshToken()
+	if err != nil {
+		return "", "", err
+	}
+
+	expiresAt := time.Now().Add(auth.RefreshTokenTTL)
+	if _, err := h.store.CreateRefreshToken(ctx, userID, hash, expiresAt); err != nil {
+		return "", "", err
+	}
+
+	return access, plain, nil
+}
