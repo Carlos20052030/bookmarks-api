@@ -158,3 +158,71 @@ func (h *AuthHandler) issueTokens(ctx context.Context, userID uuid.UUID) (access
 
 	return access, plain, nil
 }
+
+// dummyHash is a precomputed bcrypt hash of a random string, used to
+// keep login timing constant whether or not the email exists.
+// Never matches any real password.
+var dummyHash = []byte("$2a$12$0000000000000000000000000000000000000000000000000000")
+
+
+type loginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+// Login verifies credentials and issues a fresh token pair.
+// It returns the same error code for unknown email and wrong password,
+// and takes the same amount of time in both cases, to prevent user
+// enumeration through responses or timing.
+func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	var req loginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", "request body is not valid json")
+		return
+	}
+
+	email := normalizeEmail(req.Email)
+	if email == "" || req.Password == "" {
+		writeError(w, http.StatusBadRequest, "missing_fields", "email and password are required")
+		return
+	}
+
+	user, err := h.store.GetUserByEmail(r.Context(), email)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			// Spend the same time as a real bcrypt check would, then
+			// fail with the same response. Do not leak that the user
+			// is unknown.
+			_ = auth.CheckPassword(string(dummyHash), req.Password)
+			writeError(w, http.StatusUnauthorized, "invalid_credentials", "email or password is incorrect")
+			return
+		}
+		h.logger.Error("get user by email", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	if err := auth.CheckPassword(user.PasswordHash, req.Password); err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid_credentials", "email or password is incorrect")
+		return
+	}
+
+	accessToken, refreshToken, err := h.issueTokens(r.Context(), user.ID)
+	if err != nil {
+		h.logger.Error("issue tokens", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, authResponse{
+		User: userResponse{
+			ID:        user.ID,
+			Email:     user.Email,
+			CreatedAt: user.CreatedAt,
+		},
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    int(auth.AccessTokenTTL.Seconds()),
+	})
+}
