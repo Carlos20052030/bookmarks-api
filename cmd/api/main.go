@@ -34,7 +34,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := server.New(cfg.Server)
+	srv := server.New(cfg.Server, slog.Default())
 	if err := srv.Run(ctx); err != nil {
 		slog.Error("server", "err", err)
 		os.Exit(1)

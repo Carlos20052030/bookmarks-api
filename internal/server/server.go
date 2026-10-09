@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Carlos20052030/bookmarks-api/internal/config"
+	"github.com/Carlos20052030/bookmarks-api/internal/middleware"
 )
 
 const (
@@ -24,16 +25,22 @@ type Server struct {
 	http *http.Server
 }
 
-// New builds the HTTP server with its routes and timeouts.
+// New builds the HTTP server with its routes, middleware chain and timeouts.
 // The server is not started until Run is called.
-func New(cfg config.ServerConfig) *Server {
+func New(cfg config.ServerConfig, logger *slog.Logger) *Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth)
+
+	handler := middleware.Chain(mux,
+		middleware.RequestID,
+		middleware.Logging(logger),
+		middleware.Recovery(logger),
+	)
 
 	return &Server{
 		http: &http.Server{
 			Addr:              fmt.Sprintf(":%d", cfg.Port),
-			Handler:           mux,
+			Handler:           handler,
 			ReadHeaderTimeout: readHeaderTimeout,
 			ReadTimeout:       readTimeout,
 			WriteTimeout:      writeTimeout,
