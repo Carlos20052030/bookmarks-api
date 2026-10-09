@@ -67,3 +67,18 @@ func (s *Store) RevokeRefreshToken(ctx context.Context, id uuid.UUID) error {
 	}
 	return nil
 }
+
+// RevokeAllUserTokens marks every non-revoked refresh token for a user
+// as revoked. Called when token reuse is detected, to force re-login
+// on all devices.
+func (s *Store) RevokeAllUserTokens(ctx context.Context, userID uuid.UUID) error {
+	const q = `
+		UPDATE refresh_tokens
+		SET revoked_at = NOW()
+		WHERE user_id = $1 AND revoked_at IS NULL
+	`
+	if _, err := s.db.ExecContext(ctx, q, userID); err != nil {
+		return fmt.Errorf("revoke all user tokens: %w", err)
+	}
+	return nil
+}

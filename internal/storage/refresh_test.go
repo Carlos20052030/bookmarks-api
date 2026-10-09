@@ -110,3 +110,38 @@ func mustCreateUser(t *testing.T, email string) domain.User {
 	}
 	return u
 }
+
+func TestRevokeAllUserTokens(t *testing.T) {
+	cleanTables(t)
+	ctx := context.Background()
+
+	user := mustCreateUser(t, "u5@example.com")
+
+	// Three tokens for the same user.
+	t1, _ := testStore.CreateRefreshToken(ctx, user.ID, "h1", time.Now().Add(time.Hour))
+	t2, _ := testStore.CreateRefreshToken(ctx, user.ID, "h2", time.Now().Add(time.Hour))
+	_, _ = testStore.CreateRefreshToken(ctx, user.ID, "h3", time.Now().Add(time.Hour))
+
+	if err := testStore.RevokeAllUserTokens(ctx, user.ID); err != nil {
+		t.Fatalf("RevokeAllUserTokens: %v", err)
+	}
+
+	for _, hash := range []string{"h1", "h2", "h3"} {
+		tok, err := testStore.GetRefreshTokenByHash(ctx, hash)
+		if err != nil {
+			t.Fatalf("get %s: %v", hash, err)
+		}
+		if tok.RevokedAt == nil {
+			t.Fatalf("token %s was not revoked", hash)
+		}
+	}
+
+	// Re-running must be a no-op, not an error.
+	if err := testStore.RevokeAllUserTokens(ctx, user.ID); err != nil {
+		t.Fatalf("second revoke: %v", err)
+	}
+
+	// Ensure t1/t2 identifiers were actually used (avoid unused warnings).
+	_ = t1.ID
+	_ = t2.ID
+}

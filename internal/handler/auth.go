@@ -26,6 +26,7 @@ type Store interface {
 	CreateRefreshToken(ctx context.Context, userID uuid.UUID, tokenHash string, expiresAt time.Time) (domain.RefreshToken, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (domain.RefreshToken, error)
 	RevokeRefreshToken(ctx context.Context, id uuid.UUID) error
+	RevokeAllUserTokens(ctx context.Context, userID uuid.UUID) error
 }
 
 // AuthHandler holds the dependencies for auth endpoints.
@@ -225,4 +226,114 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		TokenType:    "Bearer",
 		ExpiresIn:    int(auth.AccessTokenTTL.Seconds()),
 	})
+}
+
+type refreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+type refreshResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+}
+
+// Refresh rotates a refresh token. If the incoming token is valid, it is
+// revoked and a new access+refresh pair is issued. If a revoked token is
+// presented (reuse), all of the user's tokens are revoked as a safety
+// measure, forcing re-login on every device.
+func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", "request body is not valid json")
+		return
+	}
+	if req.RefreshToken == "" {
+		writeError(w, http.StatusBadRequest, "missing_fields", "refresh_token is required")
+		return
+	}
+
+	hash := auth.HashRefreshToken(req.RefreshToken)
+	token, err := h.store.GetRefreshTokenByHash(r.Context(), hash)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusUnauthorized, "invalid_refresh_token", "")
+			return
+		}
+		h.logger.Error("get refresh token", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	// Reuse detection: a revoked token is being presented. Either the
+	// client raced itself, or the token was stolen. Treat as compromise
+	// and revoke everything for this user.
+	if token.RevokedAt != nil {
+		h.logger.Warn("refresh token reuse detected", "user_id", token.UserID)
+		if err := h.store.RevokeAllUserTokens(r.Context(), token.UserID); err != nil {
+			h.logger.Error("revoke all user tokens", "err", err)
+		}
+		writeError(w, http.StatusUnauthorized, "invalid_refresh_token", "")
+		return
+	}
+
+	if time.Now().After(token.ExpiresAt) {
+		writeError(w, http.StatusUnauthorized, "invalid_refresh_token", "")
+		return
+	}
+
+	if err := h.store.RevokeRefreshToken(r.Context(), token.ID); err != nil {
+		h.logger.Error("revoke refresh token", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	accessToken, newRefresh, err := h.issueTokens(r.Context(), token.UserID)
+	if err != nil {
+		h.logger.Error("issue tokens", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, refreshResponse{
+		AccessToken:  accessToken,
+		RefreshToken: newRefresh,
+		TokenType:    "Bearer",
+		ExpiresIn:    int(auth.AccessTokenTTL.Seconds()),
+	})
+}
+
+// Logout revokes the presented refresh token. It is idempotent: a missing
+// or already-revoked token returns 204 to avoid leaking which tokens exist.
+func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", "request body is not valid json")
+		return
+	}
+	if req.RefreshToken == "" {
+		writeError(w, http.StatusBadRequest, "missing_fields", "refresh_token is required")
+		return
+	}
+
+	hash := auth.HashRefreshToken(req.RefreshToken)
+	token, err := h.store.GetRefreshTokenByHash(r.Context(), hash)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		h.logger.Error("get refresh token", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	if err := h.store.RevokeRefreshToken(r.Context(), token.ID); err != nil {
+		h.logger.Error("revoke refresh token", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

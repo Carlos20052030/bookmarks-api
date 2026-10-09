@@ -34,6 +34,12 @@ type fakeStore struct {
 	lastCreatedEmail       string
 	lastCreatedHash        string
 	lastRefreshTokenUserID uuid.UUID
+
+	revokeAllUserTokensErr error
+	revokeAllUserTokensID  uuid.UUID
+
+	getRefreshTokenByHashErr   error
+	getRefreshTokenByHashToken domain.RefreshToken
 }
 
 func (f *fakeStore) GetUserByEmail(_ context.Context, _ string) (domain.User, error) {
@@ -66,12 +72,22 @@ func (f *fakeStore) CreateRefreshToken(_ context.Context, userID uuid.UUID, _ st
 	return domain.RefreshToken{ID: uuid.New(), UserID: userID}, nil
 }
 
-func (f *fakeStore) GetRefreshTokenByHash(_ context.Context, _ string) (domain.RefreshToken, error) {
-	return domain.RefreshToken{}, storage.ErrNotFound
+func (f *fakeStore) GetRefreshTokenByHash(_ context.Context, hash string) (domain.RefreshToken, error) {
+	if f.getRefreshTokenByHashErr != nil {
+		return domain.RefreshToken{}, f.getRefreshTokenByHashErr
+	}
+	tok := f.getRefreshTokenByHashToken
+	tok.TokenHash = hash
+	return tok, nil
 }
 
 func (f *fakeStore) RevokeRefreshToken(_ context.Context, _ uuid.UUID) error {
 	return nil
+}
+
+func (f *fakeStore) RevokeAllUserTokens(_ context.Context, userID uuid.UUID) error {
+	f.revokeAllUserTokensID = userID
+	return f.revokeAllUserTokensErr
 }
 
 func newTestAuthHandler(fs *fakeStore) *AuthHandler {
@@ -293,4 +309,130 @@ func TestLogin_MissingFields(t *testing.T) {
 		}
 		assertErrorCode(t, rec, "missing_fields")
 	}
+}
+
+// --- Testes de Refresh ---
+
+func newStoreWithValidToken(t *testing.T) (*fakeStore, string) {
+	t.Helper()
+	hash, err := auth.HashPassword("correct horse")
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	user := domain.User{ID: uuid.New(), Email: "a@b.com", PasswordHash: hash}
+
+	const plain = "some-opaque-refresh-token"
+	storedHash := auth.HashRefreshToken(plain)
+
+	fs := &fakeStore{}
+	fs.getUserByEmailUser = user
+	fs.getRefreshTokenByHashToken = domain.RefreshToken{
+		ID:        uuid.New(),
+		UserID:    user.ID,
+		TokenHash: storedHash,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	return fs, plain
+}
+
+func TestRefresh_Success(t *testing.T) {
+	fs, plain := newStoreWithValidToken(t)
+	h := newTestAuthHandler(fs)
+
+	rec := postJSON(t, h.Refresh, `{"refresh_token":"`+plain+`"}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp refreshResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.AccessToken == "" || resp.RefreshToken == "" {
+		t.Fatal("tokens are empty")
+	}
+}
+
+func TestRefresh_NotFound(t *testing.T) {
+	fs := &fakeStore{getRefreshTokenByHashErr: storage.ErrNotFound}
+	h := newTestAuthHandler(fs)
+
+	rec := postJSON(t, h.Refresh, `{"refresh_token":"whatever"}`)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	assertErrorCode(t, rec, "invalid_refresh_token")
+}
+
+func TestRefresh_RevokedTokenTriggersRevokeAll(t *testing.T) {
+	fs, plain := newStoreWithValidToken(t)
+	revoked := time.Now().Add(-time.Minute)
+	fs.getRefreshTokenByHashToken.RevokedAt = &revoked
+	h := newTestAuthHandler(fs)
+
+	rec := postJSON(t, h.Refresh, `{"refresh_token":"`+plain+`"}`)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	assertErrorCode(t, rec, "invalid_refresh_token")
+	// The reuse detector must have revoked all tokens for that user.
+	if fs.revokeAllUserTokensID == uuid.Nil {
+		t.Fatal("RevokeAllUserTokens was not called on reuse")
+	}
+	if fs.revokeAllUserTokensID != fs.getRefreshTokenByHashToken.UserID {
+		t.Fatal("RevokeAllUserTokens called with wrong user ID")
+	}
+}
+
+func TestRefresh_ExpiredToken(t *testing.T) {
+	fs, plain := newStoreWithValidToken(t)
+	fs.getRefreshTokenByHashToken.ExpiresAt = time.Now().Add(-time.Hour)
+	h := newTestAuthHandler(fs)
+
+	rec := postJSON(t, h.Refresh, `{"refresh_token":"`+plain+`"}`)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestRefresh_MissingToken(t *testing.T) {
+	h := newTestAuthHandler(&fakeStore{})
+	rec := postJSON(t, h.Refresh, `{}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	assertErrorCode(t, rec, "missing_fields")
+}
+
+// --- Testes de Logout ---
+
+func TestLogout_Success(t *testing.T) {
+	fs, plain := newStoreWithValidToken(t)
+	h := newTestAuthHandler(fs)
+
+	rec := postJSON(t, h.Logout, `{"refresh_token":"`+plain+`"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+}
+
+func TestLogout_IdempotentWhenTokenUnknown(t *testing.T) {
+	fs := &fakeStore{getRefreshTokenByHashErr: storage.ErrNotFound}
+	h := newTestAuthHandler(fs)
+
+	rec := postJSON(t, h.Logout, `{"refresh_token":"never-existed"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 (idempotent)", rec.Code)
+	}
+}
+
+func TestLogout_MissingToken(t *testing.T) {
+	h := newTestAuthHandler(&fakeStore{})
+	rec := postJSON(t, h.Logout, `{}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	assertErrorCode(t, rec, "missing_fields")
 }
