@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/Carlos20052030/bookmarks-api/internal/config"
+	"github.com/Carlos20052030/bookmarks-api/internal/handler"
 	"github.com/Carlos20052030/bookmarks-api/internal/server"
 	"github.com/Carlos20052030/bookmarks-api/internal/storage"
 )
@@ -34,7 +35,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := server.New(cfg.Server, slog.Default())
+	store := storage.NewStore(db)
+	authHandler := handler.NewAuthHandler(store, cfg.JWT.Secret, slog.Default())
+
+	srv := server.New(cfg.Server, authHandler, slog.Default())
 	if err := srv.Run(ctx); err != nil {
 		slog.Error("server", "err", err)
 		os.Exit(1)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Carlos20052030/bookmarks-api/internal/config"
+	"github.com/Carlos20052030/bookmarks-api/internal/handler"
 	"github.com/Carlos20052030/bookmarks-api/internal/middleware"
 )
 
@@ -25,13 +26,19 @@ type Server struct {
 	http *http.Server
 }
 
-// New builds the HTTP server with its routes, middleware chain and timeouts.
+// New builds the HTTP server with routes, middleware chain and timeouts.
 // The server is not started until Run is called.
-func New(cfg config.ServerConfig, logger *slog.Logger) *Server {
+func New(cfg config.ServerConfig, auth *handler.AuthHandler, logger *slog.Logger) *Server {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", handleHealth)
 
-	handler := middleware.Chain(mux,
+	// Public routes.
+	mux.HandleFunc("GET /health", handleHealth)
+	mux.HandleFunc("POST /auth/register", auth.Register)
+	mux.HandleFunc("POST /auth/login", auth.Login)
+	mux.HandleFunc("POST /auth/refresh", auth.Refresh)
+	mux.HandleFunc("POST /auth/logout", auth.Logout)
+
+	handlerChain := middleware.Chain(mux,
 		middleware.RequestID,
 		middleware.Logging(logger),
 		middleware.Recovery(logger),
@@ -40,7 +47,7 @@ func New(cfg config.ServerConfig, logger *slog.Logger) *Server {
 	return &Server{
 		http: &http.Server{
 			Addr:              fmt.Sprintf(":%d", cfg.Port),
-			Handler:           handler,
+			Handler:           handlerChain,
 			ReadHeaderTimeout: readHeaderTimeout,
 			ReadTimeout:       readTimeout,
 			WriteTimeout:      writeTimeout,
