@@ -28,15 +28,29 @@ type Server struct {
 
 // New builds the HTTP server with routes, middleware chain and timeouts.
 // The server is not started until Run is called.
-func New(cfg config.ServerConfig, auth *handler.AuthHandler, logger *slog.Logger) *Server {
+func New(
+	cfg config.ServerConfig,
+	authH *handler.AuthHandler,
+	bookmarkH *handler.BookmarkHandler,
+	jwtSecret []byte,
+	logger *slog.Logger,
+) *Server {
 	mux := http.NewServeMux()
+	requireAuth := middleware.Auth(jwtSecret, logger)
 
 	// Public routes.
 	mux.HandleFunc("GET /health", handleHealth)
-	mux.HandleFunc("POST /auth/register", auth.Register)
-	mux.HandleFunc("POST /auth/login", auth.Login)
-	mux.HandleFunc("POST /auth/refresh", auth.Refresh)
-	mux.HandleFunc("POST /auth/logout", auth.Logout)
+	mux.HandleFunc("POST /auth/register", authH.Register)
+	mux.HandleFunc("POST /auth/login", authH.Login)
+	mux.HandleFunc("POST /auth/refresh", authH.Refresh)
+	mux.HandleFunc("POST /auth/logout", authH.Logout)
+
+	// Protected routes: every request must carry a valid access token.
+	mux.Handle("POST /bookmarks", requireAuth(http.HandlerFunc(bookmarkH.Create)))
+	mux.Handle("GET /bookmarks", requireAuth(http.HandlerFunc(bookmarkH.List)))
+	mux.Handle("GET /bookmarks/{id}", requireAuth(http.HandlerFunc(bookmarkH.Get)))
+	mux.Handle("PUT /bookmarks/{id}", requireAuth(http.HandlerFunc(bookmarkH.Update)))
+	mux.Handle("DELETE /bookmarks/{id}", requireAuth(http.HandlerFunc(bookmarkH.Delete)))
 
 	handlerChain := middleware.Chain(mux,
 		middleware.RequestID,
