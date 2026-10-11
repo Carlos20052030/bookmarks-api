@@ -38,8 +38,9 @@ func main() {
 	store := storage.NewStore(db)
 	authHandler := handler.NewAuthHandler(store, cfg.JWT.Secret, slog.Default())
 	bookmarkHandler := handler.NewBookmarkHandler(store, slog.Default())
+    tagHandler := handler.NewTagHandler(store, slog.Default())
 
-	srv := server.New(cfg.Server, authHandler, bookmarkHandler, cfg.JWT.Secret, slog.Default())
+	srv := server.New(cfg.Server, authHandler, bookmarkHandler, tagHandler, cfg.JWT.Secret, slog.Default())
 	if err := srv.Run(ctx); err != nil {
 		slog.Error("server", "err", err)
 		os.Exit(1)

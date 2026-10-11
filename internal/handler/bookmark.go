@@ -30,6 +30,8 @@ type BookmarkStore interface {
 	UpdateBookmark(ctx context.Context, userID, id uuid.UUID, url, title string) (domain.Bookmark, error)
 	DeleteBookmark(ctx context.Context, userID, id uuid.UUID) error
 	ListBookmarkTags(ctx context.Context, userID, bookmarkID uuid.UUID) ([]domain.Tag, error)
+	AttachTag(ctx context.Context, userID, bookmarkID, tagID uuid.UUID) error
+	DetachTag(ctx context.Context, userID, bookmarkID, tagID uuid.UUID) error
 }
 
 type BookmarkHandler struct {
@@ -295,6 +297,68 @@ func (h *BookmarkHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.Error("delete bookmark", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// AttachTag handles POST /bookmarks/{id}/tags/{tagID}.
+// Both resources must belong to the requesting user; otherwise 404.
+func (h *BookmarkHandler) AttachTag(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "")
+		return
+	}
+
+	bookmarkID, ok := parseID(w, r, "id")
+	if !ok {
+		return
+	}
+	tagID, ok := parseID(w, r, "tagID")
+	if !ok {
+		return
+	}
+
+	if err := h.store.AttachTag(r.Context(), userID, bookmarkID, tagID); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "")
+			return
+		}
+		h.logger.Error("attach tag", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DetachTag handles DELETE /bookmarks/{id}/tags/{tagID}.
+// Idempotent: removing a link that does not exist still returns 204.
+func (h *BookmarkHandler) DetachTag(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "")
+		return
+	}
+
+	bookmarkID, ok := parseID(w, r, "id")
+	if !ok {
+		return
+	}
+	tagID, ok := parseID(w, r, "tagID")
+	if !ok {
+		return
+	}
+
+	if err := h.store.DetachTag(r.Context(), userID, bookmarkID, tagID); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "")
+			return
+		}
+		h.logger.Error("detach tag", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "")
 		return
 	}

@@ -32,6 +32,7 @@ func New(
 	cfg config.ServerConfig,
 	authH *handler.AuthHandler,
 	bookmarkH *handler.BookmarkHandler,
+	tagH *handler.TagHandler,
 	jwtSecret []byte,
 	logger *slog.Logger,
 ) *Server {
@@ -45,12 +46,19 @@ func New(
 	mux.HandleFunc("POST /auth/refresh", authH.Refresh)
 	mux.HandleFunc("POST /auth/logout", authH.Logout)
 
-	// Protected routes: every request must carry a valid access token.
+	// Protected: bookmarks.
 	mux.Handle("POST /bookmarks", requireAuth(http.HandlerFunc(bookmarkH.Create)))
 	mux.Handle("GET /bookmarks", requireAuth(http.HandlerFunc(bookmarkH.List)))
 	mux.Handle("GET /bookmarks/{id}", requireAuth(http.HandlerFunc(bookmarkH.Get)))
 	mux.Handle("PUT /bookmarks/{id}", requireAuth(http.HandlerFunc(bookmarkH.Update)))
 	mux.Handle("DELETE /bookmarks/{id}", requireAuth(http.HandlerFunc(bookmarkH.Delete)))
+	mux.Handle("POST /bookmarks/{id}/tags/{tagID}", requireAuth(http.HandlerFunc(bookmarkH.AttachTag)))
+	mux.Handle("DELETE /bookmarks/{id}/tags/{tagID}", requireAuth(http.HandlerFunc(bookmarkH.DetachTag)))
+
+	// Protected: tags.
+	mux.Handle("POST /tags", requireAuth(http.HandlerFunc(tagH.Create)))
+	mux.Handle("GET /tags", requireAuth(http.HandlerFunc(tagH.List)))
+	mux.Handle("DELETE /tags/{id}", requireAuth(http.HandlerFunc(tagH.Delete)))
 
 	handlerChain := middleware.Chain(mux,
 		middleware.RequestID,
