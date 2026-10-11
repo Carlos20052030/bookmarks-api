@@ -1,0 +1,25 @@
+# Version control
+.git
+.gitignore
+
+# Secrets — never sent to the build context
+.env
+.env.*
+!.env.example
+
+# Local artifacts
+bin/
+*.db
+*.db-journal
+
+# Docs and tooling (not needed in the image)
+docs/
+*.md
+LICENSE
+Makefile
+docker-compose.yml
+docker-compose.override.yml
+
+# IDE
+.vscode/
+.idea/
