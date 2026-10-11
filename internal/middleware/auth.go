@@ -59,3 +59,10 @@ func writeAuthError(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusUnauthorized)
 	_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 }
+
+// WithUserID returns a context carrying the given user ID. Used by tests
+// and by any code that needs to inject a principal without going through
+// the Auth middleware.
+func WithUserID(ctx context.Context, id uuid.UUID) context.Context {
+	return context.WithValue(ctx, userIDKey, id)
+}
