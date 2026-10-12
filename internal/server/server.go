@@ -34,15 +34,20 @@ func New(
 	bookmarkH *handler.BookmarkHandler,
 	tagH *handler.TagHandler,
 	jwtSecret []byte,
+	loginLimiter *middleware.Limiter,
+	registerLimiter *middleware.Limiter,
 	logger *slog.Logger,
 ) *Server {
 	mux := http.NewServeMux()
 	requireAuth := middleware.Auth(jwtSecret, logger)
 
+	rateLimitLogin := middleware.RateLimit(loginLimiter, middleware.IPKey)
+	rateLimitRegister := middleware.RateLimit(registerLimiter, middleware.IPKey)
+
 	// Public routes.
 	mux.HandleFunc("GET /health", handleHealth)
-	mux.HandleFunc("POST /auth/register", authH.Register)
-	mux.HandleFunc("POST /auth/login", authH.Login)
+	mux.Handle("POST /auth/register", rateLimitRegister(http.HandlerFunc(authH.Register)))
+	mux.Handle("POST /auth/login", rateLimitLogin(http.HandlerFunc(authH.Login)))
 	mux.HandleFunc("POST /auth/refresh", authH.Refresh)
 	mux.HandleFunc("POST /auth/logout", authH.Logout)
 
@@ -79,7 +84,6 @@ func New(
 }
 
 // Run starts the HTTP server and blocks until ctx is cancelled.
-// On cancellation it performs a graceful shutdown within shutdownTimeout.
 func (s *Server) Run(ctx context.Context) error {
 	errCh := make(chan error, 1)
 
