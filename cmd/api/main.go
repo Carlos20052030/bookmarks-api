@@ -6,12 +6,14 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Carlos20052030/bookmarks-api/internal/config"
 	"github.com/Carlos20052030/bookmarks-api/internal/handler"
 	"github.com/Carlos20052030/bookmarks-api/internal/middleware"
 	"github.com/Carlos20052030/bookmarks-api/internal/server"
 	"github.com/Carlos20052030/bookmarks-api/internal/storage"
+	"github.com/Carlos20052030/bookmarks-api/internal/fetcher"
 )
 
 func main() {
@@ -46,7 +48,8 @@ func main() {
 
 	store := storage.NewStore(db)
 	authHandler := handler.NewAuthHandler(store, cfg.JWT.Secret, slog.Default())
-	bookmarkHandler := handler.NewBookmarkHandler(store, slog.Default())
+	titleFetcher := fetcher.New(5 * time.Second)
+	bookmarkHandler := handler.NewBookmarkHandler(store, titleFetcher, slog.Default())
 	tagHandler := handler.NewTagHandler(store, slog.Default())
 
 	srv := server.New(

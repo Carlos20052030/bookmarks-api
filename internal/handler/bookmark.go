@@ -34,13 +34,20 @@ type BookmarkStore interface {
 	DetachTag(ctx context.Context, userID, bookmarkID, tagID uuid.UUID) error
 }
 
-type BookmarkHandler struct {
-	store  BookmarkStore
-	logger *slog.Logger
+// Fetcher retrieves a page title. Returns "" with no error when the page
+// has no title. Errors are for transport-level failures only.
+type Fetcher interface {
+	FetchTitle(ctx context.Context, url string) (string, error)
 }
 
-func NewBookmarkHandler(store BookmarkStore, logger *slog.Logger) *BookmarkHandler {
-	return &BookmarkHandler{store: store, logger: logger}
+type BookmarkHandler struct {
+	store   BookmarkStore
+	fetcher Fetcher
+	logger  *slog.Logger
+}
+
+func NewBookmarkHandler(store BookmarkStore, fetcher Fetcher, logger *slog.Logger) *BookmarkHandler {
+	return &BookmarkHandler{store: store, fetcher: fetcher, logger: logger}
 }
 
 // --- request / response types ---
@@ -135,6 +142,19 @@ func (h *BookmarkHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if !validURL(req.URL) {
 		writeError(w, http.StatusBadRequest, "invalid_url", "url must be an absolute http or https URL")
 		return
+	}
+
+	// Best-effort title fetch: if the user did not provide a title and the
+	// page is reachable, use the page's <title>. Any failure (timeout,
+	// blocked address, no title) silently leaves the title empty.
+	if req.Title == "" {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if title, err := h.fetcher.FetchTitle(ctx, req.URL); err != nil {
+			h.logger.Debug("title fetch failed", "url", req.URL, "err", err)
+		} else if title != "" {
+			req.Title = title
+		}
 	}
 
 	bm, err := h.store.CreateBookmark(r.Context(), userID, req.URL, req.Title)

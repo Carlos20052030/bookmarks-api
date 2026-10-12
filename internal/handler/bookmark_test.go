@@ -15,6 +15,16 @@ import (
 	"github.com/google/uuid"
 )
 
+// fakeFetcher is a hand-written stub for the Fetcher interface.
+type fakeFetcher struct {
+	title string
+	err   error
+}
+
+func (f *fakeFetcher) FetchTitle(_ context.Context, _ string) (string, error) {
+	return f.title, f.err
+}
+
 // fakeBookmarkStore is a hand-written test double for BookmarkStore.
 type fakeBookmarkStore struct {
 	createErr   error
@@ -96,7 +106,11 @@ func (f *fakeBookmarkStore) DetachTag(_ context.Context, _, bookmarkID, tagID uu
 }
 
 func newTestBookmarkHandler(fs *fakeBookmarkStore) *BookmarkHandler {
-	return NewBookmarkHandler(fs, discardLogger())
+	return NewBookmarkHandler(fs, &fakeFetcher{}, discardLogger())
+}
+
+func newTestBookmarkHandlerWithFetcher(fs *fakeBookmarkStore, ff *fakeFetcher) *BookmarkHandler {
+	return NewBookmarkHandler(fs, ff, discardLogger())
 }
 
 // --- CRUD tests ---
@@ -313,3 +327,64 @@ func TestDetachTag_NotFound(t *testing.T) {
 // Sanity: unused import guard (encoding/json used in some tests above).
 var _ = json.Marshal
 var _ = errors.New
+
+func TestBookmarkCreate_FetchesTitleWhenMissing(t *testing.T) {
+	userID := uuid.New()
+	fs := &fakeBookmarkStore{bookmark: domain.Bookmark{ID: uuid.New(), URL: "https://x.com", Title: "Fetched Title"}}
+	ff := &fakeFetcher{title: "Fetched Title"}
+	h := newTestBookmarkHandlerWithFetcher(fs, ff)
+
+	req := httptest.NewRequest(http.MethodPost, "/bookmarks", bytes.NewBufferString(`{"url":"https://x.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(middleware.WithUserID(req.Context(), userID))
+	rec := httptest.NewRecorder()
+	h.Create(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if fs.createdTitle != "Fetched Title" {
+		t.Fatalf("title = %q, want Fetched Title", fs.createdTitle)
+	}
+}
+
+func TestBookmarkCreate_KeepsProvidedTitle(t *testing.T) {
+	userID := uuid.New()
+	fs := &fakeBookmarkStore{bookmark: domain.Bookmark{ID: uuid.New(), URL: "https://x.com", Title: "Mine"}}
+	ff := &fakeFetcher{title: "Fetched Title"}
+	h := newTestBookmarkHandlerWithFetcher(fs, ff)
+
+	req := httptest.NewRequest(http.MethodPost, "/bookmarks", bytes.NewBufferString(`{"url":"https://x.com","title":"Mine"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(middleware.WithUserID(req.Context(), userID))
+	rec := httptest.NewRecorder()
+	h.Create(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if fs.createdTitle != "Mine" {
+		t.Fatalf("title = %q, want Mine (fetcher should not have run)", fs.createdTitle)
+	}
+}
+
+func TestBookmarkCreate_FetcherFailureIgnored(t *testing.T) {
+	userID := uuid.New()
+	fs := &fakeBookmarkStore{bookmark: domain.Bookmark{ID: uuid.New(), URL: "https://x.com"}}
+	ff := &fakeFetcher{err: errors.New("timeout")}
+	h := newTestBookmarkHandlerWithFetcher(fs, ff)
+
+	req := httptest.NewRequest(http.MethodPost, "/bookmarks", bytes.NewBufferString(`{"url":"https://x.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(middleware.WithUserID(req.Context(), userID))
+	rec := httptest.NewRecorder()
+	h.Create(rec, req)
+
+	// Fetch failure must not fail the request.
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if fs.createdTitle != "" {
+		t.Fatalf("title = %q, want empty", fs.createdTitle)
+	}
+}
