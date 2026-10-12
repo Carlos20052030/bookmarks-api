@@ -119,10 +119,10 @@ CloudMonitor has not been restarted.
 | Docker bypasses ufw silently | Documented in `deployment.md` troubleshooting section |
 | PyCharm save race before `git add` | Always `Ctrl+S`; create new files from the terminal when in doubt |
 
-## Post-V1 (V1.1 and beyond)
+## Post-V1 (V2 and beyond)
 
-- Rate limiting on `/auth/*` (in-memory, per IP and per email)
-- Fetch the page `<title>` on bookmark creation, with SSRF protection
-- HTTPS via Caddy (requires a domain name)
-- Prometheus metrics and Grafana dashboards (that is Project 6)
+- HTTPS termination via Caddy (requires a domain name)
+- Prometheus metrics and Grafana dashboards (Project 6 of the broader track)
 - CI/CD pipeline replacing manual `git pull` + `docker compose`
+- Redis-backed rate limiter (survives container restart, shared across replicas)
+- Additional alert channels for the CloudMonitor sibling project

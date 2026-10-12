@@ -53,6 +53,11 @@ CloudMonitor on the same VPS.
 - Multi-stage Dockerfile producing a small runtime image (31 MB)
 - Scheduled `pg_dump` backup to a host-mounted directory, retaining the
   last 4 copies, with a documented restore procedure that has been tested
+- Rate limiting on `/auth/register` and `/auth/login`, in-memory, per IP,
+  token bucket algorithm; returns `429` with a `Retry-After` header
+- Best-effort fetch of the page `<title>` on bookmark creation, with a
+  5-second timeout and SSRF protection (private, loopback, and link-local
+  addresses are refused)
 - Deploy on the same Hetzner CX23 VPS as CloudMonitor, coexisting without
   disrupting it
 - Documentation: README, scope, roadmap, architecture, deployment, postmortem
@@ -84,8 +89,6 @@ These are explicitly deferred. Do not build them in V1.
 - GraphQL, gRPC, or any protocol other than HTTP+JSON
 - Soft delete, audit log, or event sourcing
 - Field-level encryption at rest beyond what Postgres and the OS provide
-- Rate limiting beyond the in-memory variant (deferred to V1.1)
-- Fetching page titles on bookmark creation (deferred to V1.1)
 - HTTPS termination via a reverse proxy (requires a domain name)
 
 ## User
