@@ -26,7 +26,7 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 }
 
 // Logging emits one structured log line per request with method, path,
-// status, bytes, duration and the request ID set by RequestID.
+// status, bytes, duration, request ID, and the normalized client IP.
 func Logging(logger *slog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +40,7 @@ func Logging(logger *slog.Logger) Middleware {
 				"bytes", rec.bytes,
 				"duration_ms", time.Since(start).Milliseconds(),
 				"request_id", RequestIDFromContext(r.Context()),
+				"client_ip", IPKey(r),
 			)
 		})
 	}

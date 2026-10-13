@@ -36,18 +36,26 @@ func New(
 	jwtSecret []byte,
 	loginLimiter *middleware.Limiter,
 	registerLimiter *middleware.Limiter,
+	emailLimiter *middleware.Limiter,
 	logger *slog.Logger,
 ) *Server {
 	mux := http.NewServeMux()
 	requireAuth := middleware.Auth(jwtSecret, logger)
 
-	rateLimitLogin := middleware.RateLimit(loginLimiter, middleware.IPKey)
-	rateLimitRegister := middleware.RateLimit(registerLimiter, middleware.IPKey)
+	// Rate limit per IP (normalized to /64 for IPv6) and per email.
+	// Both layers must pass. IP blocks network-level abuse; the email
+	// layer catches credential stuffing with rotating IPs.
+	rateLimitLoginIP := middleware.RateLimit(loginLimiter, middleware.IPKey)
+	rateLimitLoginEmail := middleware.RateLimit(emailLimiter, middleware.EmailKeyFromBody)
+	rateLimitRegisterIP := middleware.RateLimit(registerLimiter, middleware.IPKey)
+	rateLimitRegisterEmail := middleware.RateLimit(emailLimiter, middleware.EmailKeyFromBody)
 
 	// Public routes.
 	mux.HandleFunc("GET /health", handleHealth)
-	mux.Handle("POST /auth/register", rateLimitRegister(http.HandlerFunc(authH.Register)))
-	mux.Handle("POST /auth/login", rateLimitLogin(http.HandlerFunc(authH.Login)))
+	mux.Handle("POST /auth/register",
+		rateLimitRegisterIP(rateLimitRegisterEmail(http.HandlerFunc(authH.Register))))
+	mux.Handle("POST /auth/login",
+		rateLimitLoginIP(rateLimitLoginEmail(http.HandlerFunc(authH.Login))))
 	mux.HandleFunc("POST /auth/refresh", authH.Refresh)
 	mux.HandleFunc("POST /auth/logout", authH.Logout)
 

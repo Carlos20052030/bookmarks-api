@@ -1,10 +1,14 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -97,25 +101,90 @@ func (l *Limiter) cleanup() {
 	}
 }
 
-// --- middleware ---
+// --- keys ---
 
 // KeyFunc extracts the rate-limit key from a request. Return "" to skip
 // limiting for that request.
 type KeyFunc func(*http.Request) string
 
-// IPKey returns the client's IP address. It trusts RemoteAddr only and
-// ignores X-Forwarded-For, which can be spoofed without a trusted proxy.
+// IPKey returns the client's IP address as a rate-limit key. IPv4
+// addresses are used as-is. IPv6 addresses are collapsed to their /64
+// prefix so a single client cannot bypass limits by rotating through its
+// own range (a /64 contains billions of addresses).
+//
+// X-Forwarded-For is deliberately ignored: without a trusted reverse proxy
+// in front, the header is spoofable by the client.
 func IPKey(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
 	}
-	return host
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return host
+	}
+	return normalizeIP(ip)
 }
+
+// normalizeIP returns a string form of the IP suitable for use as a
+// rate-limit key. IPv4 addresses are returned as-is; IPv6 addresses are
+// masked to their /64 prefix. This follows the convention used by AWS and
+// Cloudflare for per-client accounting.
+func normalizeIP(ip net.IP) string {
+	if v4 := ip.To4(); v4 != nil {
+		return v4.String()
+	}
+	v6 := ip.To16()
+	if v6 == nil {
+		return ip.String()
+	}
+	masked := make(net.IP, net.IPv6len)
+	copy(masked, v6)
+	for i := 8; i < 16; i++ {
+		masked[i] = 0
+	}
+	return masked.String()
+}
+
+// EmailKeyFromBody extracts the "email" field from a JSON request body and
+// returns it as a rate-limit key, prefixed with "email:" to avoid colliding
+// with IP keys in the same limiter. The body is buffered and restored so
+// the downstream handler can read it again.
+//
+// Returns "" when the body is missing, too large, or not JSON with an
+// email field. In those cases the caller skips the email-based check and
+// lets the handler produce the appropriate error.
+func EmailKeyFromBody(r *http.Request) string {
+	if r.Body == nil || r.ContentLength > maxBodyBytes {
+		return ""
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes))
+	if err != nil {
+		return ""
+	}
+	_ = r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(body))
+
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return ""
+	}
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if email == "" {
+		return ""
+	}
+	return "email:" + email
+}
+
+const maxBodyBytes = 4096
+
+// --- middleware ---
 
 // RateLimit returns a middleware that limits requests per key. When the
 // limit is exceeded, it replies 429 with Retry-After and does not call
-// the next handler.
+// the next handler. A key of "" skips limiting for that request.
 func RateLimit(limiter *Limiter, keyFn KeyFunc) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

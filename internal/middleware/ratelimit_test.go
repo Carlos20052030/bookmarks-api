@@ -2,8 +2,11 @@ package middleware
 
 import (
 	"context"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -122,4 +125,64 @@ func TestLimiter_StartCleanerStops(t *testing.T) {
 	cancel()
 	// Give the goroutine time to observe the cancellation.
 	time.Sleep(10 * time.Millisecond)
+}
+
+func TestNormalizeIP_IPv4(t *testing.T) {
+	for _, tc := range []struct {
+		in, want string
+	}{
+		{"192.0.2.1", "192.0.2.1"},
+		{"8.8.8.8", "8.8.8.8"},
+	} {
+		got := normalizeIP(net.ParseIP(tc.in))
+		if got != tc.want {
+			t.Errorf("normalizeIP(%s) = %s, want %s", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeIP_IPv6CollapsesToSlash64(t *testing.T) {
+	// Two addresses in the same /64 must collapse to the same key.
+	a := normalizeIP(net.ParseIP("2001:db8:abcd:1234::1"))
+	b := normalizeIP(net.ParseIP("2001:db8:abcd:1234::ffff:ffff"))
+	if a != b {
+		t.Fatalf("same /64 produced different keys: %s vs %s", a, b)
+	}
+
+	// A different /64 must produce a different key.
+	c := normalizeIP(net.ParseIP("2001:db8:abcd:5678::1"))
+	if a == c {
+		t.Fatalf("different /64 collapsed: %s", a)
+	}
+}
+
+func TestEmailKeyFromBody_ExtractsAndNormalizes(t *testing.T) {
+	body := `{"email":"  Alice@Example.COM  ","password":"x"}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	got := EmailKeyFromBody(req)
+	if got != "email:alice@example.com" {
+		t.Fatalf("got %q", got)
+	}
+
+	// Body must be readable again by the handler.
+	restored, _ := io.ReadAll(req.Body)
+	if string(restored) != body {
+		t.Fatalf("body not restored: %q", string(restored))
+	}
+}
+
+func TestEmailKeyFromBody_MalformedJSON(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{not json`))
+	if got := EmailKeyFromBody(req); got != "" {
+		t.Fatalf("malformed JSON should return empty key, got %q", got)
+	}
+}
+
+func TestEmailKeyFromBody_MissingEmail(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"password":"x"}`))
+	if got := EmailKeyFromBody(req); got != "" {
+		t.Fatalf("missing email should return empty key, got %q", got)
+	}
 }

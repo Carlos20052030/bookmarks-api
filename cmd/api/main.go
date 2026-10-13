@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/Carlos20052030/bookmarks-api/internal/config"
+	"github.com/Carlos20052030/bookmarks-api/internal/fetcher"
 	"github.com/Carlos20052030/bookmarks-api/internal/handler"
 	"github.com/Carlos20052030/bookmarks-api/internal/middleware"
 	"github.com/Carlos20052030/bookmarks-api/internal/server"
 	"github.com/Carlos20052030/bookmarks-api/internal/storage"
-	"github.com/Carlos20052030/bookmarks-api/internal/fetcher"
 )
 
 func main() {
@@ -38,17 +38,28 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Login: 10 attempts per minute per IP.
+	// Rate limits: three buckets, all must pass.
+	//
+	//   loginIP      — 10/min per client IP (normalized to /64 for IPv6)
+	//   registerIP   — 5/min per client IP
+	//   email        — 10/min per email address, applies to login and register
+	//
+	// The email bucket is what closes the door on credential stuffing from
+	// a rotating IP pool: even if the attacker rotates IPs, the target
+	// account still gets 10 attempts per minute.
 	loginLimiter := middleware.NewLimiter(10, 10.0/60.0)
 	loginLimiter.StartCleaner(ctx)
 
-	// Register: 5 attempts per minute per IP (stricter than login).
 	registerLimiter := middleware.NewLimiter(5, 5.0/60.0)
 	registerLimiter.StartCleaner(ctx)
 
+	emailLimiter := middleware.NewLimiter(10, 10.0/60.0)
+	emailLimiter.StartCleaner(ctx)
+
+	titleFetcher := fetcher.New(5 * time.Second)
+
 	store := storage.NewStore(db)
 	authHandler := handler.NewAuthHandler(store, cfg.JWT.Secret, slog.Default())
-	titleFetcher := fetcher.New(5 * time.Second)
 	bookmarkHandler := handler.NewBookmarkHandler(store, titleFetcher, slog.Default())
 	tagHandler := handler.NewTagHandler(store, slog.Default())
 
@@ -60,6 +71,7 @@ func main() {
 		cfg.JWT.Secret,
 		loginLimiter,
 		registerLimiter,
+		emailLimiter,
 		slog.Default(),
 	)
 	if err := srv.Run(ctx); err != nil {
