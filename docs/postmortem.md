@@ -84,6 +84,44 @@ It created five empty files named `DB`, `Handlers`, `MW`, `Server`, and
 `Storage`. Removed with `rm`. Lesson: long text goes into the editor,
 not the terminal. Terminals interpret; editors accept.
 
+**The IDE did not support Go.**
+
+For the first six days of the project I was using PyCharm Community as
+the editor. It rendered Go files, saved them on `Ctrl+S`, and let me run
+`go build` and `go test` in the integrated terminal. What I did not
+realize is that PyCharm Community **does not support the official Go
+plugin** — JetBrains reserves it for PyCharm Professional and GoLand.
+The IDE was treating `.go` files as plain text. No autocomplete, no
+jump-to-definition, no smart quote pairing.
+
+I discovered this on day 7 when the auto-close-quote feature stopped
+working. Three hours of troubleshooting later (Invalidate Caches, moving
+config folders, reinstalling PyCharm), the root cause was structural,
+not a bug: the editor had never supported the language.
+
+Fix: migrated to GoLand (trial), installed the official Go 1.27.1 from
+`go.dev` (replacing the Snap install), and configured Go Modules with
+GOPATH. Imports resolved. Everything works.
+
+Lesson: **check that the IDE supports the language before starting the
+project.** A one-minute check would have saved half a day of work and a
+lot of frustration.
+
+**Pasted Mermaid diagram into the terminal.**
+
+The terminal tried to execute every line of a Mermaid code block as a
+shell command. It created five empty files named `DB`, `Handlers`, `MW`,
+`Server`, and `Storage`. Removed with `rm`. Second time in one week that
+content meant for an editor ended up in a shell prompt.
+
+**Flapping notification from CloudMonitor targets.**
+
+Between 08/10 and 13/10 the CloudMonitor sent several DOWN/UP alerts
+alternating for Google and Example. Diagnosed as transient route
+problems between the Hetzner datacenter and the target CDNs. Ping tests
+showed 0% packet loss and 3-7ms latency when checked. The service itself
+never crashed — the streak of 7 consecutive days was not affected.
+
 ## What surprised me
 
 **The multi-stage image was 31 MB.** The builder was 800 MB. I knew it

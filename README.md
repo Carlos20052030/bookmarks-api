@@ -21,8 +21,8 @@ just the Go standard library.
 - **Bookmarks with tags** — full CRUD, pagination, tag filtering, attach/detach
 - **Structured logging** — one log line per request with method, path, status, duration, and request ID
 - **Graceful shutdown** — in-flight requests finish before the process exits
-- **Rate limiting** — token bucket per IP on `/auth/login` (10/min) and `/auth/register` (5/min); returns `429` with `Retry-After`
-- **Page title fetch** — fetches `<title>` on bookmark creation when no title is given, with SSRF protection (private, loopback, and link-local addresses are refused)
+- **Rate limiting** — token bucket per IP (normalized to /64 for IPv6) **and** per email on `/auth/login` (10/min) and `/auth/register` (5/min); returns `429` with `Retry-After`
+- **Page title fetch** — fetches `<title>` on bookmark creation when no title is given, with SSRF protection: private, loopback, link-local, CGNAT, and metadata addresses are refused before the TCP connection opens
 - **Zero framework** — `net/http` with Go 1.22+ `ServeMux` patterns; `database/sql` with the `pgx` driver
 
 ## Tech Stack
