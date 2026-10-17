@@ -24,6 +24,7 @@ just the Go standard library.
 - **Rate limiting** — token bucket per IP (normalized to /64 for IPv6) **and** per email on `/auth/login` (10/min) and `/auth/register` (5/min); returns `429` with `Retry-After`
 - **Page title fetch** — fetches `<title>` on bookmark creation when no title is given, with SSRF protection: private, loopback, link-local, CGNAT, and metadata addresses are refused before the TCP connection opens
 - **Zero framework** — `net/http` with Go 1.22+ `ServeMux` patterns; `database/sql` with the `pgx` driver
+- **Webhook Dispatching**: Publishes `bookmark.created` events asynchronously to a separate Webhook Dispatcher service using a fire-and-forget pattern.
 
 ## Tech Stack
 

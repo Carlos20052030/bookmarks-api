@@ -22,8 +22,8 @@ RUN go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
 FROM alpine:3.21
 
 # CA certificates for outbound HTTPS, tzdata so timestamps are correct.
-RUN apk add --no-cache ca-certificates tzdata && \
-    addgroup -S app && adduser -S -G app app
+RUN apk add --no-cache ca-certificates tzdata curl && \
+    addgroup -S app && adduser -S -D -H -G app app
 
 USER app
 WORKDIR /app
@@ -33,6 +33,6 @@ COPY --from=builder /out/api /app/api
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget -q --spider http://localhost:8080/health || exit 1
+    CMD curl -f http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["/app/api"]
