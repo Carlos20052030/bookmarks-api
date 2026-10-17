@@ -215,7 +215,57 @@ V1.1 items, deliberately excluded from V1:
   (deny private, loopback, and link-local IPs)
 - **Prometheus metrics** — this is Project 6 of the broader track
 
+## Addendum: Webhook Dispatcher Integration (17/10/2026)
+
+Five days after V1 went live, the API was extended to publish events
+to a separate Webhook Dispatcher service. This section documents the
+issues found during that integration.
+
+**Docker networking: `host.docker.internal` does not work on Linux.**
+
+The Bookmarks API could not reach the Webhook Dispatcher. Logs showed
+`dial tcp: lookup host.docker.internal: no such host`.
+
+`host.docker.internal` is a Docker Desktop feature (Mac/Windows). On
+native Linux, Docker does not resolve it by default.
+
+**Fix:** Added `extra_hosts: - "host.docker.internal:host-gateway"` to
+the API's `docker-compose.yml`. This maps the hostname to the Docker
+bridge gateway, allowing the container to reach the host.
+
+**Lesson:** Always test container networking on the target OS. Linux
+requires explicit host-gateway mapping for host communication.
+
+**Port conflict (8080).**
+
+Running both the API and the Dispatcher locally caused a `port is
+already allocated` error.
+
+**Fix:** Mapped the Bookmarks API to host port 8081 (`"8081:8080"` in
+Compose) while keeping the internal container port at 8080.
+
+**Lesson:** Container ports and host ports are independent. Use host
+port mapping to resolve conflicts without changing application code.
+
+**JWT expired during manual integration testing.**
+
+Creating a bookmark returned `401 Unauthorized` even with a valid token.
+
+**Root cause:** The JWT access token has a 15-minute TTL (`expires_in:
+900`). By the time the `curl` was executed, the token had expired.
+
+**Fix:** Regenerated the token via `POST /auth/login` immediately before
+testing. For long testing sessions, automate the login step.
+
+**The Fire-and-Forget pattern saved the API.**
+
+When the Dispatcher was deliberately shut down during testing, the
+Bookmarks API continued to return `201 Created` to the user. The
+background goroutine logged the network error, but the user experience
+was unaffected. This proved the resilience of the decoupled architecture.
+
 ## Thanks
 
 To everyone who reviewed a broken commit, explained what `alpine` is, and
 told me to stop pasting into the terminal. You know who you are.
+

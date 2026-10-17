@@ -337,3 +337,13 @@ Deliberately excluded. See `docs/scope.md` for the full list.
 - Multi-region, read replicas, sharding
 - Metrics endpoint (Prometheus is Project 6)
 - API versioning — V1 is the version
+
+## Event Publishing (Fire-and-Forget)
+
+When a bookmark is created, the API publishes a `bookmark.created` event to the Webhook Dispatcher.
+
+This is a **fire-and-forget** operation:
+- The event is pushed to a bounded buffered channel (capacity 256).
+- Two background goroutines consume the channel and send HTTP POST requests to the Dispatcher.
+- The API request returns `201 Created` immediately. It never blocks waiting for the Dispatcher.
+- If the Dispatcher is unreachable, the error is logged in the background and the event is dropped. The user experience is unaffected.
