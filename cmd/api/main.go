@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Carlos20052030/bookmarks-api/internal/config"
+	"github.com/Carlos20052030/bookmarks-api/internal/dispatcher"
 	"github.com/Carlos20052030/bookmarks-api/internal/fetcher"
 	"github.com/Carlos20052030/bookmarks-api/internal/handler"
 	"github.com/Carlos20052030/bookmarks-api/internal/middleware"
@@ -56,11 +57,14 @@ func main() {
 	emailLimiter := middleware.NewLimiter(10, 10.0/60.0)
 	emailLimiter.StartCleaner(ctx)
 
+	dispClient := dispatcher.NewClient(cfg.DispatcherURL, cfg.IngestToken)
+	defer dispClient.Close()
+
 	titleFetcher := fetcher.New(5 * time.Second)
 
 	store := storage.NewStore(db)
 	authHandler := handler.NewAuthHandler(store, cfg.JWT.Secret, slog.Default())
-	bookmarkHandler := handler.NewBookmarkHandler(store, titleFetcher, slog.Default())
+	bookmarkHandler := handler.NewBookmarkHandler(store, titleFetcher, dispClient, slog.Default())
 	tagHandler := handler.NewTagHandler(store, slog.Default())
 
 	srv := server.New(

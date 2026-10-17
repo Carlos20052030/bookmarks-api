@@ -18,6 +18,9 @@ type Config struct {
 	Database DatabaseConfig
 	JWT      JWTConfig
 	LogLevel string
+
+	DispatcherURL string
+	IngestToken   string
 }
 
 type ServerConfig struct {
@@ -50,6 +53,9 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		Server:   ServerConfig{Port: defaultServerPort},
 		LogLevel: defaultLogLevel,
+
+		DispatcherURL: getEnv("DISPATCHER_URL", "http://localhost:8080"), // Default local
+		IngestToken:   os.Getenv("INGEST_TOKEN"),
 	}
 
 	if v := os.Getenv("SERVER_PORT"); v != "" {
@@ -104,4 +110,11 @@ func Load() (*Config, error) {
 	cfg.JWT.Secret = []byte(secret)
 
 	return cfg, nil
+}
+
+func getEnv(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return value
+	}
+	return fallback
 }

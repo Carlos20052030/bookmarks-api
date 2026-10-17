@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Carlos20052030/bookmarks-api/internal/dispatcher"
 	"github.com/Carlos20052030/bookmarks-api/internal/domain"
 	"github.com/Carlos20052030/bookmarks-api/internal/middleware"
 	"github.com/Carlos20052030/bookmarks-api/internal/storage"
@@ -41,13 +42,14 @@ type Fetcher interface {
 }
 
 type BookmarkHandler struct {
-	store   BookmarkStore
-	fetcher Fetcher
-	logger  *slog.Logger
+	store      BookmarkStore
+	fetcher    Fetcher
+	dispatcher *dispatcher.Client
+	logger     *slog.Logger
 }
 
-func NewBookmarkHandler(store BookmarkStore, fetcher Fetcher, logger *slog.Logger) *BookmarkHandler {
-	return &BookmarkHandler{store: store, fetcher: fetcher, logger: logger}
+func NewBookmarkHandler(store BookmarkStore, fetcher Fetcher, disp *dispatcher.Client, logger *slog.Logger) *BookmarkHandler {
+	return &BookmarkHandler{store: store, fetcher: fetcher, dispatcher: disp, logger: logger}
 }
 
 // --- request / response types ---
@@ -162,6 +164,20 @@ func (h *BookmarkHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("create bookmark", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "")
 		return
+	}
+
+	if h.dispatcher != nil {
+		h.dispatcher.Publish(dispatcher.Event{
+			ID:         uuid.New().String(),
+			Type:       "bookmark.created",
+			UserID:     userID.String(),
+			OccurredAt: time.Now().UTC(),
+			Data: map[string]any{
+				"id":    bm.ID.String(),
+				"url":   bm.URL,
+				"title": bm.Title,
+			},
+		})
 	}
 
 	writeJSON(w, http.StatusCreated, toBookmarkResponse(bm, nil))
