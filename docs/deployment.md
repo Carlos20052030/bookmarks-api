@@ -63,11 +63,13 @@ cd bookmarks-api
 
 ## 3. Configure
 
+Copy the example file to create your local `.env`:
+
 ```bash
 cp .env.example .env
 ```
 
-Generate two secrets and paste them into `.env`:
+Generate two secrets and paste them into the `.env` file:
 
 ```bash
 openssl rand -base64 32   # POSTGRES_PASSWORD
@@ -76,7 +78,7 @@ openssl rand -base64 48   # JWT_SECRET
 
 The `.env` file must contain:
 
-```
+```env
 POSTGRES_USER=bookmarks
 POSTGRES_PASSWORD=<generated>
 POSTGRES_DB=bookmarks
@@ -85,6 +87,10 @@ POSTGRES_PORT=5432
 SERVER_PORT=8080
 LOG_LEVEL=info
 JWT_SECRET=<generated>
+
+# Webhook Dispatcher integration
+DISPATCHER_URL=http://172.17.0.1:8080
+INGEST_TOKEN=<generated-must-match-dispatcher>
 ```
 
 `.env` is gitignored. Never commit it.
@@ -254,3 +260,4 @@ output is not a complete view of what is exposed. Ports published with
   start with a shorter value.
 - **Rotate secrets by editing `.env` and restarting the stack.** Existing
   JWTs signed with the old secret become invalid.
+- **The `INGEST_TOKEN` must be identical to the Webhook Dispatcher's token.** This authenticates internal service-to-service communication.
