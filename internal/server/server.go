@@ -74,6 +74,7 @@ func New(
 	mux.Handle("DELETE /tags/{id}", requireAuth(http.HandlerFunc(tagH.Delete)))
 
 	handlerChain := middleware.Chain(mux,
+		middleware.CORS,
 		middleware.RequestID,
 		middleware.Logging(logger),
 		middleware.Recovery(logger),
