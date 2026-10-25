@@ -1,6 +1,6 @@
-# Postmortem — Bookmarks API V1
+# Postmortem — Bookmarks API V1.1
 
-Written on 12/10/2026, one day after the V1 went into production.
+Written on 12/10/2026, updated on 25/10/2026.
 
 This is not a list of wins. It is what actually happened, what went wrong,
 and what I would do differently next time.
@@ -15,11 +15,7 @@ and what I would do differently next time.
 - **Day 4 (10/10)** — auth handlers, bookmark CRUD, IDOR tests
 - **Day 5 (11/10)** — tag handlers, multi-stage Dockerfile, deploy to VPS
 - **Day 6 (12/10)** — README, architecture guide, backup script, deployment doc
-
-Six days of work, one commit per day at minimum, 130+ tests, a live API on a
-Hetzner VPS. Faster than the four-week estimate in `docs/roadmap.md`. Not
-because the work was easy — because the plan was tight and the tests came
-before the features.
+- **Phase 5 (17/10 to 25/10)** — Webhook Dispatcher integration, Nuntix Proxy (TLS), API Keys, and Database Consolidation.
 
 ## What went well
 
@@ -27,7 +23,7 @@ before the features.
 unit tests before it ever touched a real HTTP request. By the time I opened
 `curl`, I was not debugging features — I was verifying them. The first
 production smoke test passed on the first attempt because the code had
-already been exercised 130 times.
+already been exercised 130+ times.
 
 **Ownership scoping in SQL, not in middleware.** Every query filters by
 `user_id`. The IDOR tests (`TestGetBookmarkByID_IDOR`, `TestUpdateBookmark_IDOR`,
@@ -50,8 +46,8 @@ deploys to a 4 GB VPS without a single adjustment.
 
 1. On Day 2 I pasted the local Postgres password into a chat window while
    asking for help with `.env` syntax. It was a dev-only password against a
-   local Docker container, so the blast radius was zero. But it was still a
-   mistake. Fix: rotate before deploy (done), and never paste values, only
+   local Docker container, so the blast radius was zero. But it was still
+   a mistake. Fix: rotate before deploy (done), and never paste values, only
    names (`POSTGRES_PASSWORD=...`).
 
 2. On Day 5 I realized the Telegram bot token for CloudMonitor had leaked
@@ -74,12 +70,11 @@ After deploy, `curl http://<vps-ip>:8080/health` worked from my laptop
 before I ever ran `sudo ufw allow 8080`. Docker inserts its own iptables
 rules before `ufw` sees the traffic. The `ufw status` output still shows
 only ports 22, 80, and 443 — but 8080 is open. This is documented Docker
-behavior, not a bug, but it is not obvious until you hit it. The
-`deployment.md` troubleshooting section now warns about this.
+behavior, not a bug, but it is not obvious until you hit it.
 
-**Pasted the Mermaid diagram into the terminal.**
+**Pasted content into the terminal.**
 
-The shell tried to execute every line of a Mermaid block as a command.
+The shell tried to execute every line of a Mermaid block (and later a markdown block) as a command.
 It created five empty files named `DB`, `Handlers`, `MW`, `Server`, and
 `Storage`. Removed with `rm`. Lesson: long text goes into the editor,
 not the terminal. Terminals interpret; editors accept.
@@ -102,17 +97,6 @@ not a bug: the editor had never supported the language.
 Fix: migrated to GoLand (trial), installed the official Go 1.27.1 from
 `go.dev` (replacing the Snap install), and configured Go Modules with
 GOPATH. Imports resolved. Everything works.
-
-Lesson: **check that the IDE supports the language before starting the
-project.** A one-minute check would have saved half a day of work and a
-lot of frustration.
-
-**Pasted Mermaid diagram into the terminal.**
-
-The terminal tried to execute every line of a Mermaid code block as a
-shell command. It created five empty files named `DB`, `Handlers`, `MW`,
-`Server`, and `Storage`. Removed with `rm`. Second time in one week that
-content meant for an editor ended up in a shell prompt.
 
 **Flapping notification from CloudMonitor targets.**
 
@@ -161,8 +145,7 @@ change, but some of them ("docs: add architecture guide") bundled 340
 lines. Smaller commits would have made the review easier and the history
 more readable.
 
-**Do not paste long content into a terminal.** Ever again. The Mermaid
-incident was the second time in one week. Long text into the IDE.
+**Do not paste long content into a terminal.** Ever again. Long text into the IDE.
 Commands into the terminal. Simple rule, learned twice.
 
 ## What I learned
@@ -206,16 +189,9 @@ debugging session that ended with "Postgres caches the password in the
 volume" was me. The AI answered none of that. It just told me where to
 look.
 
-## Next
+---
 
-V1.1 items, deliberately excluded from V1:
-
-- **Rate limiting on `/auth/*`** — in-memory, per IP and per email
-- **Fetch the page title on bookmark creation** — with SSRF protection
-  (deny private, loopback, and link-local IPs)
-- **Prometheus metrics** — this is Project 6 of the broader track
-
-## Addendum: Webhook Dispatcher Integration (17/10/2026)
+## Addendum 1: Webhook Dispatcher Integration (17/10/2026)
 
 Five days after V1 went live, the API was extended to publish events
 to a separate Webhook Dispatcher service. This section documents the
@@ -225,47 +201,56 @@ issues found during that integration.
 
 The Bookmarks API could not reach the Webhook Dispatcher. Logs showed
 `dial tcp: lookup host.docker.internal: no such host`.
-
 `host.docker.internal` is a Docker Desktop feature (Mac/Windows). On
 native Linux, Docker does not resolve it by default.
-
 **Fix:** Added `extra_hosts: - "host.docker.internal:host-gateway"` to
 the API's `docker-compose.yml`. This maps the hostname to the Docker
 bridge gateway, allowing the container to reach the host.
-
-**Lesson:** Always test container networking on the target OS. Linux
-requires explicit host-gateway mapping for host communication.
+**Lesson:** Always test container networking on the target OS.
 
 **Port conflict (8080).**
-
 Running both the API and the Dispatcher locally caused a `port is
 already allocated` error.
-
 **Fix:** Mapped the Bookmarks API to host port 8081 (`"8081:8080"` in
 Compose) while keeping the internal container port at 8080.
-
-**Lesson:** Container ports and host ports are independent. Use host
-port mapping to resolve conflicts without changing application code.
+**Lesson:** Container ports and host ports are independent.
 
 **JWT expired during manual integration testing.**
-
 Creating a bookmark returned `401 Unauthorized` even with a valid token.
+**Root cause:** The JWT access token has a 15-minute TTL. By the time the `curl` was executed, it had expired.
+**Fix:** Regenerated the token via `POST /auth/login` immediately before testing.
 
-**Root cause:** The JWT access token has a 15-minute TTL (`expires_in:
-900`). By the time the `curl` was executed, the token had expired.
+---
 
-**Fix:** Regenerated the token via `POST /auth/login` immediately before
-testing. For long testing sessions, automate the login step.
+## Addendum 2: Nuntix Monorepo & API Keys (25/10/2026)
 
-**The Fire-and-Forget pattern saved the API.**
+As the ecosystem grew, the API was integrated into the Nuntix ecosystem. The `reverse-proxy` (built in Go + React) now acts as the entry point, serving the frontend and routing traffic to this API. This required adding CORS and a new authentication method for machine-to-machine communication (API Keys).
 
-When the Dispatcher was deliberately shut down during testing, the
-Bookmarks API continued to return `201 Created` to the user. The
-background goroutine logged the network error, but the user experience
-was unaffected. This proved the resilience of the decoupled architecture.
+**The Abuse Report (Security Incident).**
+
+We received an alert from Hetzner/CERT-Bund indicating that our Redis container (used by the Dispatcher) was exposed to the internet.
+**Root cause:** Docker ignores UFW rules by default. The compose file had `ports: - "6379:6379"`, exposing it to `0.0.0.0`.
+**Fix:** Changed all compose files to map ports to `127.0.0.1` (e.g., `127.0.0.1:6379:6379`) and ran `sudo ufw deny 6379`.
+**Lesson:** Docker's port mapping bypasses UFW. Always bind sensitive ports to localhost in production.
+
+**Database Consolidation (The end of over-engineering).**
+
+We realized the Bookmarks API and Dispatcher were running separate Postgres containers, wasting RAM and violating the `scope.md` we wrote.
+**Fix:** We dumped the Dispatcher database, restored it inside the Bookmarks container (`bookmarks-api-db-1`) as a separate logical database (`webhook_dispatcher`), and deleted the redundant container.
+**Lesson:** In a single-node architecture, Shared Database (logical isolation) is preferred over separate containers for cost and maintenance simplicity.
+
+**The API Keys integration.**
+
+The frontend (React) could not authenticate using JWTs in external scripts. We added API Keys (hashed with SHA-256) to allow server-to-server communication.
+**Problem:** The React frontend was getting CORS errors when trying to fetch `/api-keys`.
+**Fix:** We added a `cors.go` middleware and ensured `Access-Control-Allow-Origin` was set for `nuntix.com.br`.
+
+**CORS and the Monorepo.**
+
+When we moved the React frontend to be served directly by the Go Proxy (Monorepo), we no longer needed CORS for the frontend. However, we kept it for local development (`localhost:5173`) and as a safety net.
+**Lesson:** Monorepos eliminate CORS in production. If both frontend and backend live in the same binary, the browser sees them as the same origin.
 
 ## Thanks
 
 To everyone who reviewed a broken commit, explained what `alpine` is, and
 told me to stop pasting into the terminal. You know who you are.
-

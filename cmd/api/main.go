@@ -67,11 +67,15 @@ func main() {
 	bookmarkHandler := handler.NewBookmarkHandler(store, titleFetcher, dispClient, slog.Default())
 	tagHandler := handler.NewTagHandler(store, slog.Default())
 
+	// Initialize API Keys handler
+	apiKeyHandler := handler.NewAPIKeyHandler(store)
+
 	srv := server.New(
 		cfg.Server,
 		authHandler,
 		bookmarkHandler,
 		tagHandler,
+		apiKeyHandler, // Pass the new handler to the server
 		cfg.JWT.Secret,
 		loginLimiter,
 		registerLimiter,

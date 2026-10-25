@@ -1,18 +1,17 @@
 # Deployment — Bookmarks API
 
-How to run this service in production on a Linux VPS with Docker Compose.
+How to run this service in production on a Linux VPS with Docker Compose, integrated with the Nuntix ecosystem.
 
 > Repository: https://github.com/Carlos20052030/bookmarks-api
 
 ## Overview
 
-The production stack has two containers:
+The production stack is part of a larger ecosystem (Nuntix). The containers involved are:
 
-- **`api`** — the Go binary, exposed on port `8080`
-- **`db`** — Postgres 17, reachable only from the `api` container over the
-  Compose network
-
-Postgres is **not** exposed to the host. The only open port is `8080`.
+- **`api`** — the Go binary. It listens internally on port `8080`, but is mapped to the host as `127.0.0.1:8081` to avoid conflicts. It is not directly exposed to the internet.
+- **`db`** — Postgres 17. It is mapped to `127.0.0.1:5432` so the Nuntix Proxy (running on the host network) and the Webhook Dispatcher can access it.
+- **`reverse-proxy`** (Nuntix) — Sits in front, handles TLS (Let's Encrypt), and routes public traffic to the API.
+- **`webhook-dispatcher`** — Connects to the same database to process webhook deliveries.
 
 ## Requirements
 
@@ -72,7 +71,7 @@ cp .env.example .env
 Generate two secrets and paste them into the `.env` file:
 
 ```bash
-openssl rand -base64 32   # POSTGRES_PASSWORD
+openssl rand -base64 32   # POSTGRES_PASSWORD (must be URL-encoded if used in URLs)
 openssl rand -base64 48   # JWT_SECRET
 ```
 
@@ -89,7 +88,8 @@ LOG_LEVEL=info
 JWT_SECRET=<generated>
 
 # Webhook Dispatcher integration
-DISPATCHER_URL=http://172.17.0.1:8080
+# Points to the dispatcher container on the shared Docker network
+DISPATCHER_URL=http://webhook-dispatcher-dispatcher-1:8080
 INGEST_TOKEN=<generated-must-match-dispatcher>
 ```
 
@@ -97,9 +97,10 @@ INGEST_TOKEN=<generated-must-match-dispatcher>
 
 ## 4. Build and start
 
+Before starting this, ensure the `webhook-dispatcher` network exists (it is created automatically when the dispatcher starts). Then:
+
 ```bash
-docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml up -d
+docker compose up -d --build
 ```
 
 The `api` container waits for the `db` healthcheck before starting.
@@ -107,26 +108,20 @@ The `api` container waits for the `db` healthcheck before starting.
 ## 5. Verify
 
 ```bash
-docker compose -f docker-compose.prod.yml ps
+docker ps
 ```
 
-Both containers should show `(healthy)`.
+Check that `bookmarks-api-api-1` and `bookmarks-api-db-1` are `(healthy)`.
 
 ```bash
-curl -s http://localhost:8080/health
+curl -s http://127.0.0.1:8081/health
 # {"status":"ok"}
 ```
 
-From outside the VPS:
+Test the full register flow from outside the VPS (using the Nuntix Proxy domain):
 
 ```bash
-curl -s http://<vps-ip>:8080/health
-```
-
-Full register flow:
-
-```bash
-curl -s -X POST http://<vps-ip>:8080/auth/register \
+curl -s -X POST https://api.nuntix.com.br/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"smoke@test.com","password":"correcthorse"}'
 ```
@@ -141,7 +136,7 @@ compresses the result, and keeps the last 4 copies.
 Run manually once to confirm it works:
 
 ```bash
-COMPOSE_FILE=docker-compose.prod.yml ./scripts/backup.sh
+./scripts/backup.sh
 ls -lh ~/backups/bookmarks/
 ```
 
@@ -154,7 +149,7 @@ crontab -e
 Add this line (adjust paths if needed):
 
 ```
-0 3 * * * cd /home/carlos/bookmarks-api && COMPOSE_FILE=docker-compose.prod.yml ./scripts/backup.sh >> /home/carlos/backups/bookmarks/backup.log 2>&1
+0 3 * * * cd /home/carlos/bookmarks-api && ./scripts/backup.sh >> /home/carlos/backups/bookmarks/backup.log 2>&1
 ```
 
 ### Restore procedure
@@ -163,20 +158,20 @@ Tested procedure to restore the latest backup into a scratch database:
 
 ```bash
 # Create an empty database.
-docker compose -f docker-compose.prod.yml exec db \
+docker exec -it bookmarks-api-db-1 \
     psql -U bookmarks -d postgres -c "CREATE DATABASE restore_test;"
 
 # Restore the backup into it.
 gunzip -c ~/backups/bookmarks/bookmarks-<timestamp>.sql.gz | \
-    docker compose -f docker-compose.prod.yml exec -T db \
+    docker exec -i bookmarks-api-db-1 \
     psql -U bookmarks -d restore_test
 
 # Confirm data.
-docker compose -f docker-compose.prod.yml exec db \
+docker exec -it bookmarks-api-db-1 \
     psql -U bookmarks -d restore_test -c "SELECT COUNT(*) FROM users;"
 
 # Drop the scratch database.
-docker compose -f docker-compose.prod.yml exec db \
+docker exec -it bookmarks-api-db-1 \
     psql -U bookmarks -d postgres -c "DROP DATABASE restore_test;"
 ```
 
@@ -187,37 +182,35 @@ after installing the service, and again whenever the schema changes.
 
 ```bash
 cd ~/bookmarks-api
-git pull
-docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml up -d
+git pull origin main
+docker compose up -d --build
 ```
 
 Migrations run automatically on boot. To see logs:
 
 ```bash
-docker compose -f docker-compose.prod.yml logs -f api
+docker logs -f bookmarks-api-api-1
 ```
 
 ## 8. Operations
 
 | Task | Command |
 |---|---|
-| Status | `docker compose -f docker-compose.prod.yml ps` |
-| API logs | `docker compose -f docker-compose.prod.yml logs -f api` |
-| DB logs | `docker compose -f docker-compose.prod.yml logs -f db` |
-| Restart API only | `docker compose -f docker-compose.prod.yml restart api` |
-| Stop everything | `docker compose -f docker-compose.prod.yml down` |
-| Stop, keep data | `docker compose -f docker-compose.prod.yml down` (no `-v`) |
-| Stop, **delete data** | `docker compose -f docker-compose.prod.yml down -v` |
+| Status | `docker ps` |
+| API logs | `docker logs -f bookmarks-api-api-1` |
+| DB logs | `docker logs -f bookmarks-api-db-1` |
+| Restart API only | `docker restart bookmarks-api-api-1` |
+| Stop everything | `docker compose down` |
+| Stop, **delete data** | `docker compose down -v` |
 
 ## 9. Troubleshooting
 
-**`address already in use` on port 8080**
+**`address already in use` on port 8081**
 
 Something else is listening. Find and stop it:
 
 ```bash
-sudo ss -tlnp | grep 8080
+sudo ss -tlnp | grep 8081
 ```
 
 **`db` never becomes healthy**
@@ -225,7 +218,7 @@ sudo ss -tlnp | grep 8080
 Check the logs:
 
 ```bash
-docker compose -f docker-compose.prod.yml logs db | tail -30
+docker logs bookmarks-api-db-1 | tail -30
 ```
 
 Common causes: wrong password (a stale volume holds the old one), disk full,
@@ -237,23 +230,15 @@ Postgres stores the password on first init. Changing `.env` does not update
 an existing volume. To reset:
 
 ```bash
-docker compose -f docker-compose.prod.yml down -v   # deletes data
-docker compose -f docker-compose.prod.yml up -d
+docker compose down -v   # deletes data
+docker compose up -d
 ```
-
-**Firewall appears open on ports you never allowed**
-
-Docker inserts its own iptables rules that bypass `ufw`. The `ufw status`
-output is not a complete view of what is exposed. Ports published with
-`ports:` in the compose file are reachable from outside regardless of
-`ufw` rules.
 
 ## 10. Security Notes
 
 - **Secrets live in `.env` and never in git.** The `.gitignore` blocks
   `.env` and the `.dockerignore` blocks it from the build context.
-- **Postgres has no exposed port.** No `ports:` entry for the `db` service
-  in `docker-compose.prod.yml`. Only `expose: 5432`.
+- **The database is only exposed to localhost.** The `docker-compose.yml` maps the database port to `127.0.0.1:5432`. This means only the host (and the Nuntix Proxy, which runs on the host network) can access it. It is not exposed to the public internet.
 - **The API runs as a non-root user inside the container.** The Dockerfile
   creates a dedicated `app` user.
 - **JWT_SECRET must be at least 32 bytes.** The config loader refuses to
@@ -261,3 +246,5 @@ output is not a complete view of what is exposed. Ports published with
 - **Rotate secrets by editing `.env` and restarting the stack.** Existing
   JWTs signed with the old secret become invalid.
 - **The `INGEST_TOKEN` must be identical to the Webhook Dispatcher's token.** This authenticates internal service-to-service communication.
+- **CORS is restricted** to localhost (for development) and `https://nuntix.com.br` (for production).
+```

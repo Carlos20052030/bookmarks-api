@@ -33,6 +33,7 @@ func New(
 	authH *handler.AuthHandler,
 	bookmarkH *handler.BookmarkHandler,
 	tagH *handler.TagHandler,
+	apiKeyH *handler.APIKeyHandler, // <-- ADICIONADO AQUI
 	jwtSecret []byte,
 	loginLimiter *middleware.Limiter,
 	registerLimiter *middleware.Limiter,
@@ -72,6 +73,11 @@ func New(
 	mux.Handle("POST /tags", requireAuth(http.HandlerFunc(tagH.Create)))
 	mux.Handle("GET /tags", requireAuth(http.HandlerFunc(tagH.List)))
 	mux.Handle("DELETE /tags/{id}", requireAuth(http.HandlerFunc(tagH.Delete)))
+
+	// Protected: API Keys (NOVAS ROTAS AQUI)
+	mux.Handle("POST /api-keys", requireAuth(http.HandlerFunc(apiKeyH.Create)))
+	mux.Handle("GET /api-keys", requireAuth(http.HandlerFunc(apiKeyH.List)))
+	mux.Handle("DELETE /api-keys/{id}", requireAuth(http.HandlerFunc(apiKeyH.Revoke)))
 
 	handlerChain := middleware.Chain(mux,
 		middleware.CORS,

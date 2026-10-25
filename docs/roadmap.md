@@ -1,13 +1,13 @@
-# Roadmap — Bookmarks API V1
+# Roadmap — Bookmarks API
 
-Build plan for V1. Four phases, one commit per day at minimum.
+Build plan for the Bookmarks API. Originally planned for 4 weeks (V1), delivered in 6 days. Now expanded to include the SaaS ecosystem integrations (V1.1).
 
 > Repository: https://github.com/Carlos20052030/bookmarks-api
 
 ## Overview
 
-- **Planned duration:** 4 weeks (28 days)
-- **Actual duration:** 6 days (07/10 to 12/10)
+- **Planned duration (V1):** 4 weeks (28 days)
+- **Actual duration (V1):** 6 days (07/10 to 12/10)
 - **Cadence:** at least one commit per day, even if small
 - **Definition of done:** `go test ./...` passes, `golangci-lint run` is clean,
   the stack runs under Docker Compose on the VPS next to CloudMonitor, the
@@ -75,7 +75,7 @@ and attaching user B's tag to user A's bookmark also returns 404.
 | 20 | Wire all routes with `requireAuth` per route; end-to-end curl tests | done |
 | 21 | Commit; README quickstart drafted | done |
 
-## Phase 4 — Production (Week 4)
+## Phase 4 — Production (V1 Closed)
 
 **Goal:** running in Docker on the VPS next to CloudMonitor, backed up.
 
@@ -96,6 +96,21 @@ CloudMonitor has not been restarted.
 | 27 | `docs/architecture.md`, `docs/deployment.md`, `docs/postmortem.md` | done |
 | 28 | Push final; declare V1 closed | done |
 
+## Phase 5 — SaaS Integration & API Keys (V1.1)
+
+**Goal:** Integrate the Bookmarks API into the Nuntix Monorepo ecosystem, allowing the React frontend to communicate with it and external services to authenticate via API Keys.
+
+**Deliverable:** A secure API endpoint to manage API Keys and a CORS middleware to allow the Nuntix UI to fetch data.
+
+| Task | Status |
+| --- | --- |
+| `internal/middleware/cors.go` to allow the Nuntix frontend (localhost and prod) | done |
+| `internal/dispatcher/client.go` to publish events (Fire-and-Forget) | done |
+| `migrations/003_api_keys.sql` (hash, unique, indices) | done |
+| `internal/domain/api_key.go` & `internal/storage/api_key.go` | done |
+| `internal/handler/api_key.go` with SHA-256 generation and raw key return | done |
+| Wire routes in `server.go` and `main.go` | done |
+
 ## Milestones
 
 | Milestone | End of  | What it proves |
@@ -104,6 +119,7 @@ CloudMonitor has not been restarted.
 | M2 | Week 2 | Register/login/refresh/logout work with JWT |
 | M3 | Week 3 | CRUD + tags + ownership + reuse detection all work; tests green |
 | M4 | Week 4 | Docker Compose runs on the VPS, backups tested, README ready |
+| M5 | V1.1 | CORS working, API Keys endpoints exposed for the Nuntix UI |
 
 ## Risks
 
@@ -121,8 +137,8 @@ CloudMonitor has not been restarted.
 
 ## Post-V1 (V2 and beyond)
 
-- HTTPS termination via Caddy (requires a domain name)
-- Prometheus metrics and Grafana dashboards (Project 6 of the broader track)
-- CI/CD pipeline replacing manual `git pull` + `docker compose`
-- Redis-backed rate limiter (survives container restart, shared across replicas)
-- Additional alert channels for the CloudMonitor sibling project
+- **Redis-backed rate limiter:** Survives container restart and is shared across replicas.
+- **HTTPS termination via Caddy:** Requires a domain name (now solved by Nuntix's autocert).
+- **Prometheus metrics and Grafana dashboards:** To monitor the API health and throughput.
+- **Multi-tenant Webhooks:** Allow users to register webhook endpoints directly from the Nuntix UI (currently handled by the Dispatcher).
+- **CI/CD pipeline:** Replacing manual `git pull` + `docker compose` with GitHub Actions.

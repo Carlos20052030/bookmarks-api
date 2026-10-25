@@ -106,11 +106,11 @@ func (f *fakeBookmarkStore) DetachTag(_ context.Context, _, bookmarkID, tagID uu
 }
 
 func newTestBookmarkHandler(fs *fakeBookmarkStore) *BookmarkHandler {
-	return NewBookmarkHandler(fs, &fakeFetcher{}, discardLogger())
+	return NewBookmarkHandler(fs, &fakeFetcher{}, nil, discardLogger())
 }
 
 func newTestBookmarkHandlerWithFetcher(fs *fakeBookmarkStore, ff *fakeFetcher) *BookmarkHandler {
-	return NewBookmarkHandler(fs, ff, discardLogger())
+	return NewBookmarkHandler(fs, ff, nil, discardLogger())
 }
 
 // --- CRUD tests ---

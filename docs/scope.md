@@ -1,6 +1,6 @@
-# Scope — Bookmarks API V1
+# Scope — Bookmarks API V1.1
 
-This document defines what V1 does and, more importantly, what V1 does not do.
+This document defines what V1.1 does and, more importantly, what V1.1 does not do.
 Scope is the contract that prevents the project from growing forever.
 
 > Repository: https://github.com/Carlos20052030/bookmarks-api
@@ -10,16 +10,14 @@ Scope is the contract that prevents the project from growing forever.
 Developers accumulate hundreds of links — articles, docs, repos, tools — in
 browser bookmarks, chat messages, and random text files. There is no simple,
 self-hosted API to store, tag, and retrieve them with authentication and
-ownership, without signing up for a SaaS that owns the data.
+ownership, without signing up for a SaaS that owns the data. Furthermore, integrating these bookmarks with other services (like webhooks) requires manual effort.
 
 ## Objective
 
 Expose an HTTP API where a user can register, log in, and manage a private
-collection of bookmarks with tags. Authenticate with JWT access tokens and
-revocable refresh tokens. Persist in Postgres. Deploy in Docker alongside
-CloudMonitor on the same VPS.
+collection of bookmarks with tags. Authenticate with JWT access tokens and revocable refresh tokens. Provide secure API Keys for machine-to-machine integrations. Publish events asynchronously to a Webhook Dispatcher. Support CORS for the Nuntix frontend. Persist in Postgres and deploy via Docker alongside the Nuntix ecosystem.
 
-## In Scope (V1)
+## In Scope (V1.1)
 
 - User registration with email and password (bcrypt, cost 12, minimum
   password length 8 characters)
@@ -33,6 +31,9 @@ CloudMonitor on the same VPS.
 - Logout revoking the current refresh token; idempotent for unknown tokens
 - Timing attack mitigation in login — a dummy bcrypt verification runs when
   the email is unknown, so both paths take approximately the same time
+- **API Keys (Machine-to-Machine):** Generation, listing, and revocation of API Keys. Keys are prefixed with `nuntix_live_`, hashed with SHA-256 before storage, and shown only once during creation.
+- **CORS Middleware:** Configurable Cross-Origin Resource Sharing to allow the Nuntix React frontend (localhost and production domains) to communicate with the API.
+- **Event Publishing (Fire-and-Forget):** Asynchronous HTTP POST to the Webhook Dispatcher when a bookmark is created.
 - Bookmark CRUD scoped to the authenticated user (ownership enforced in
   every SQL query, not only in middleware)
 - Tags: create, list, delete; a bookmark may have many tags, a tag belongs
@@ -40,7 +41,7 @@ CloudMonitor on the same VPS.
 - Attach and detach tags from bookmarks, validating ownership of **both**
   the bookmark and the tag
 - Listing with pagination (`limit`, `offset`) and filter by tag
-- Middleware chain: request ID, structured logging, panic recovery,
+- Middleware chain: CORS, request ID, structured logging, panic recovery,
   authentication, and per-route auth enforcement
 - Consistent JSON error responses with a stable shape:
   `{"error": "...", "message": "..."}`
@@ -58,15 +59,13 @@ CloudMonitor on the same VPS.
 - Best-effort fetch of the page `<title>` on bookmark creation, with a
   5-second timeout and SSRF protection (private, loopback, and link-local
   addresses are refused)
-- Deploy on the same Hetzner CX23 VPS as CloudMonitor, coexisting without
-  disrupting it
-- Documentation: README, scope, roadmap, architecture, deployment, postmortem
+- Deploy on the same Hetzner CX23 VPS, coexisting without disrupting CloudMonitor and sharing the Postgres container with the Dispatcher.
 
-## Out of Scope (V1)
+## Out of Scope (V1.1)
 
-These are explicitly deferred. Do not build them in V1.
+These are explicitly deferred. Do not build them in V1.1.
 
-- Web UI, frontend, SPA, server-rendered HTML
+- **Web UI, frontend, SPA, server-rendered HTML:** The frontend lives in the separate `reverse-proxy` (Nuntix) repository. This API only serves JSON.
 - OAuth providers (Google, GitHub), magic links, 2FA
 - Email verification, password reset flow, email delivery of any kind
 - Roles, permissions, admin panel, teams, sharing between users
@@ -80,7 +79,7 @@ These are explicitly deferred. Do not build them in V1.
 - Favicon fetching or image proxies
 - Notifications, digests, or scheduled emails
 - Metrics endpoint (Prometheus), Grafana dashboards, tracing
-- Message queue, background workers, async processing
+- **Message queue worker:** The API only publishes events. The actual queue (Redis Streams) and the background workers live in the `webhook-dispatcher` repository.
 - Redis, Memcached, or any cache beyond an in-memory rate limiter
 - Multi-region, read replicas, sharding, or any HA concern
 - Kubernetes, Swarm, Nomad, or any orchestrator beyond Compose
@@ -89,18 +88,18 @@ These are explicitly deferred. Do not build them in V1.
 - GraphQL, gRPC, or any protocol other than HTTP+JSON
 - Soft delete, audit log, or event sourcing
 - Field-level encryption at rest beyond what Postgres and the OS provide
-- HTTPS termination via a reverse proxy (requires a domain name)
+- HTTPS termination via a reverse proxy (handled by the Nuntix Proxy).
 
 ## User
 
 A solo developer who wants a self-hosted API to store and retrieve their own
 bookmarks with authentication, and who is comfortable running a Docker
-Compose stack on a Linux VPS. Secondary user: recruiters and reviewers
-reading the repository as a portfolio piece.
+Compose stack on a Linux VPS. Secondary user: the Nuntix React frontend
+communicating via CORS, and the Webhook Dispatcher receiving event payloads.
 
 ## Success Criteria
 
-V1 is considered successful when all of the following are true:
+V1.1 is considered successful when all of the following are true:
 
 1. `go test ./...` passes without failures.
 2. `golangci-lint run` reports zero issues.
@@ -125,13 +124,16 @@ V1 is considered successful when all of the following are true:
 12. The service coexists with CloudMonitor on the same VPS without port
     conflicts and without restarting CloudMonitor.
 13. The API is reachable from outside the VPS over the public IP.
+14. **API Keys** can be generated, listed, and revoked. A request authenticated with a valid API Key succeeds; a revoked key returns 401.
+15. **CORS** allows the Nuntix frontend to fetch `/bookmarks` and `/api-keys` successfully.
+16. **Fire-and-Forget** publishes an event to the Dispatcher without blocking the HTTP response to the user.
 
 ## Constraints
 
-- Build time: 4 weeks, one commit per day (actual: 6 days).
+- Build time: 4 weeks, one commit per day (actual: 6 days for V1, +3 days for V1.1).
 - No paid third-party services. Postgres runs locally in Docker.
 - Target hardware: the existing Hetzner CX23 (2 vCPU, 4 GB RAM), shared
-  with CloudMonitor (RSS ~30 MB).
+  with CloudMonitor (RSS ~30 MB) and the Dispatcher.
 - Language: Go 1.27.
 - HTTP layer: `net/http` with `ServeMux` patterns. No router framework.
 - Database access: `database/sql` with explicit SQL. No ORM.
@@ -142,7 +144,7 @@ V1 is considered successful when all of the following are true:
 - Testing: `httptest` and hand-written fakes. No mocking framework.
 - Deployment: Docker Compose on the existing VPS. No Kubernetes.
 - Postgres is not exposed to the host in production; only the `api`
-  container reaches it, over the Compose network.
+  container and the `dispatcher` container reach it, over the Compose network.
 - Backups go to `/home/carlos/backups/bookmarks/` on the host, not inside
   the Postgres volume.
 
@@ -160,5 +162,4 @@ V1 is considered successful when all of the following are true:
 
 ## Version
 
-V1 — HTTP+JSON API. No UI. No OAuth. No sharing. Single instance, single
-database, single region. Docker Compose is the deployment unit.
+V1.1 — HTTP+JSON API. API Keys and CORS added. No UI. No OAuth. No sharing. Single instance, single database, single region. Docker Compose is the deployment unit.
