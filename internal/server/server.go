@@ -12,6 +12,7 @@ import (
 	"github.com/Carlos20052030/bookmarks-api/internal/config"
 	"github.com/Carlos20052030/bookmarks-api/internal/handler"
 	"github.com/Carlos20052030/bookmarks-api/internal/middleware"
+	"github.com/Carlos20052030/bookmarks-api/internal/storage"
 )
 
 const (
@@ -33,7 +34,8 @@ func New(
 	authH *handler.AuthHandler,
 	bookmarkH *handler.BookmarkHandler,
 	tagH *handler.TagHandler,
-	apiKeyH *handler.APIKeyHandler, // <-- ADICIONADO AQUI
+	apiKeyH *handler.APIKeyHandler,
+	store *storage.Store, // <-- store para API Key auth
 	jwtSecret []byte,
 	loginLimiter *middleware.Limiter,
 	registerLimiter *middleware.Limiter,
@@ -42,6 +44,7 @@ func New(
 ) *Server {
 	mux := http.NewServeMux()
 	requireAuth := middleware.Auth(jwtSecret, logger)
+	requireAPIKey := middleware.APIKeyAuth(store, logger)
 
 	// Rate limit per IP (normalized to /64 for IPv6) and per email.
 	// Both layers must pass. IP blocks network-level abuse; the email
@@ -78,6 +81,15 @@ func New(
 	mux.Handle("POST /api-keys", requireAuth(http.HandlerFunc(apiKeyH.Create)))
 	mux.Handle("GET /api-keys", requireAuth(http.HandlerFunc(apiKeyH.List)))
 	mux.Handle("DELETE /api-keys/{id}", requireAuth(http.HandlerFunc(apiKeyH.Revoke)))
+
+	// Test route protected by API Key auth
+	mux.Handle("GET /api/me", requireAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userID := middleware.UserIDFromContext(r.Context())
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"user_id": userID.String(),
+		})
+	})))
 
 	handlerChain := middleware.Chain(mux,
 		middleware.CORS,

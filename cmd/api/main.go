@@ -76,6 +76,7 @@ func main() {
 		bookmarkHandler,
 		tagHandler,
 		apiKeyHandler, // Pass the new handler to the server
+		store,         // Pass store for API Key auth
 		cfg.JWT.Secret,
 		loginLimiter,
 		registerLimiter,
