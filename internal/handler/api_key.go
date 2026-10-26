@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Carlos20052030/bookmarks-api/internal/middleware"
 	"github.com/Carlos20052030/bookmarks-api/internal/storage"
 	"github.com/google/uuid"
 )
@@ -38,9 +39,8 @@ func GenerateRandomKey() (string, string, string) {
 
 // Create handles the POST /api-keys request.
 func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
-	userIDStr := r.Context().Value("user_id").(string) // Assumes your middleware injects user_id into context
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == uuid.Nil {
 		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
 		return
 	}
@@ -76,9 +76,8 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // List handles the GET /api-keys request.
 func (h *APIKeyHandler) List(w http.ResponseWriter, r *http.Request) {
-	userIDStr := r.Context().Value("user_id").(string)
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == uuid.Nil {
 		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
 		return
 	}
@@ -95,9 +94,8 @@ func (h *APIKeyHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Revoke handles the DELETE /api-keys/{id} request.
 func (h *APIKeyHandler) Revoke(w http.ResponseWriter, r *http.Request) {
-	userIDStr := r.Context().Value("user_id").(string)
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == uuid.Nil {
 		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
 		return
 	}
