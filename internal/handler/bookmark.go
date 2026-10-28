@@ -169,7 +169,7 @@ func (h *BookmarkHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if h.dispatcher != nil {
 		h.dispatcher.Publish(dispatcher.Event{
 			ID:         uuid.New().String(),
-			Type:       "bookmark.created",
+			Type:       "push",
 			UserID:     userID.String(),
 			OccurredAt: time.Now().UTC(),
 			Data: map[string]any{
