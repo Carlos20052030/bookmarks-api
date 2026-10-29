@@ -4,100 +4,70 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io/fs"
-	"sort"
-	"strings"
 
 	"github.com/Carlos20052030/bookmarks-api/migrations"
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 )
 
-// Migrate applies every pending migration in lexicographic order.
-// Each migration runs inside its own transaction and is recorded in
-// schema_migrations so it is never applied twice.
+// Migrate applies every pending migration using golang-migrate.
+// It runs automatically on application startup.
 func Migrate(ctx context.Context, db *sql.DB) error {
-	if err := ensureMigrationsTable(ctx, db); err != nil {
-		return err
+	// Handle transition from old custom migration system to golang-migrate
+	// The old system created schema_migrations with (name, applied_at) columns
+	// golang-migrate expects (version, dirty) columns
+	if err := migrateLegacySchema(ctx, db); err != nil {
+		return fmt.Errorf("migrate legacy schema: %w", err)
 	}
-	applied, err := appliedMigrations(ctx, db)
+
+	// Create iofs source from embedded migrations
+	sourceDriver, err := iofs.New(migrations.FS, ".")
 	if err != nil {
-		return err
+		return fmt.Errorf("create iofs source: %w", err)
 	}
-	names, err := migrationFiles()
+
+	// Create postgres database driver
+	dbDriver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
-		return err
+		return fmt.Errorf("create postgres driver: %w", err)
 	}
-	for _, name := range names {
-		if applied[name] {
-			continue
-		}
-		if err := applyMigration(ctx, db, name); err != nil {
-			return fmt.Errorf("apply %s: %w", name, err)
-		}
+
+	// Create migrate instance
+	m, err := migrate.NewWithInstance("iofs", sourceDriver, "postgres", dbDriver)
+	if err != nil {
+		return fmt.Errorf("create migrate instance: %w", err)
 	}
+
+	// Run migrations
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("run migrations: %w", err)
+	}
+
 	return nil
 }
 
-func ensureMigrationsTable(ctx context.Context, db *sql.DB) error {
-	const q = `
-		CREATE TABLE IF NOT EXISTS schema_migrations (
-			name       TEXT PRIMARY KEY,
-			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)`
-	_, err := db.ExecContext(ctx, q)
-	return err
-}
-
-func appliedMigrations(ctx context.Context, db *sql.DB) (map[string]bool, error) {
-	rows, err := db.QueryContext(ctx, `SELECT name FROM schema_migrations`)
+// migrateLegacySchema handles the transition from the old custom migration system
+// to golang-migrate. If the old schema_migrations table exists with the old schema,
+// it drops it so golang-migrate can create its own table.
+func migrateLegacySchema(ctx context.Context, db *sql.DB) error {
+	// Check if the old schema_migrations table exists with the old schema
+	// by trying to select from it with the old column names
+	var count int
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns
+		WHERE table_name = 'schema_migrations' AND column_name = 'name'`).Scan(&count)
 	if err != nil {
-		return nil, err
+		// If query fails, table might not exist, which is fine
+		return nil
 	}
-	defer rows.Close()
 
-	applied := make(map[string]bool)
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		applied[name] = true
-	}
-	return applied, rows.Err()
-}
-
-func migrationFiles() ([]string, error) {
-	entries, err := fs.ReadDir(migrations.FS, ".")
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
-			names = append(names, e.Name())
+	if count > 0 {
+		// Old schema exists, drop it so golang-migrate can create its own
+		_, err = db.ExecContext(ctx, `DROP TABLE IF EXISTS schema_migrations`)
+		if err != nil {
+			return fmt.Errorf("drop legacy schema_migrations table: %w", err)
 		}
 	}
-	sort.Strings(names)
-	return names, nil
-}
 
-func applyMigration(ctx context.Context, db *sql.DB, name string) error {
-	content, err := migrations.FS.ReadFile(name)
-	if err != nil {
-		return err
-	}
-
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback() //nolint:errcheck // no-op after a successful commit
-
-	if _, err := tx.ExecContext(ctx, string(content)); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO schema_migrations (name) VALUES ($1)`, name); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return nil
 }
