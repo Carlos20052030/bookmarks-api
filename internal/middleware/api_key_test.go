@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/Carlos20052030/bookmarks-api/internal/domain"
 	"github.com/Carlos20052030/bookmarks-api/internal/storage"
 	"github.com/google/uuid"
@@ -20,22 +22,29 @@ import (
 
 // fakeAPIKeyStore is a test double for the API Key storage.
 type fakeAPIKeyStore struct {
-	getByHashErr   error
-	getByHashKey   domain.APIKey
-	lastHash       string
+	getByPrefixErr  error
+	getByPrefixKeys []domain.APIKey
+	lastPrefix      string
 }
 
-func (f *fakeAPIKeyStore) GetAPIKeyByHash(_ context.Context, hash string) (domain.APIKey, error) {
-	f.lastHash = hash
-	if f.getByHashErr != nil {
-		return domain.APIKey{}, f.getByHashErr
+func (f *fakeAPIKeyStore) GetAPIKeysByPrefix(_ context.Context, prefix string) ([]domain.APIKey, error) {
+	f.lastPrefix = prefix
+	if f.getByPrefixErr != nil {
+		return nil, f.getByPrefixErr
 	}
-	return f.getByHashKey, nil
+	// Filter out revoked keys to match the real storage behavior
+	var activeKeys []domain.APIKey
+	for _, key := range f.getByPrefixKeys {
+		if key.RevokedAt == nil {
+			activeKeys = append(activeKeys, key)
+		}
+	}
+	return activeKeys, nil
 }
 
 // Ensure fakeAPIKeyStore implements the required interface.
 type apiKeyStoreInterface interface {
-	GetAPIKeyByHash(ctx context.Context, hash string) (domain.APIKey, error)
+	GetAPIKeysByPrefix(ctx context.Context, prefix string) ([]domain.APIKey, error)
 }
 
 var _ apiKeyStoreInterface = (*fakeAPIKeyStore)(nil)
@@ -44,25 +53,35 @@ func newAPIKeyMiddleware(store apiKeyStoreInterface) func(http.Handler) http.Han
 	return APIKeyAuth(store, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
 }
 
-func generateTestAPIKey() (rawKey, prefix, hash string) {
+func generateTestAPIKey() (rawKey, prefix string) {
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
 	rawKey = "nuntix_live_" + hex.EncodeToString(b)
-	prefix = "nuntix_live_"
-	h := sha256.Sum256([]byte(rawKey))
-	hash = hex.EncodeToString(h[:])
+	prefix = "nuntix_live_" + hex.EncodeToString(b)[:8]
 	return
 }
 
 func TestAPIKeyAuth_ValidKey(t *testing.T) {
 	userID := uuid.New()
-	rawKey, _, hash := generateTestAPIKey()
+	rawKey, prefix := generateTestAPIKey()
+
+	// Create a bcrypt hash using SHA-256 pre-hashing (same as implementation)
+	shaHash := sha256.Sum256([]byte(rawKey))
+	shaHex := hex.EncodeToString(shaHash[:])
+	bcryptHash, err := bcrypt.GenerateFromPassword([]byte(shaHex), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("failed to generate bcrypt hash: %v", err)
+	}
 
 	fakeStore := &fakeAPIKeyStore{
-		getByHashKey: domain.APIKey{
-			ID:     uuid.New(),
-			UserID: userID,
-			Name:   "Test Key",
+		getByPrefixKeys: []domain.APIKey{
+			{
+				ID:        uuid.New(),
+				UserID:    userID,
+				Name:      "Test Key",
+				KeyPrefix: prefix,
+				KeyHash:   string(bcryptHash),
+			},
 		},
 	}
 	handler := newAPIKeyMiddleware(fakeStore)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -81,8 +100,8 @@ func TestAPIKeyAuth_ValidKey(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if fakeStore.lastHash != hash {
-		t.Fatalf("store called with hash %q, want %q", fakeStore.lastHash, hash)
+	if fakeStore.lastPrefix != prefix {
+		t.Fatalf("store called with prefix %q, want %q", fakeStore.lastPrefix, prefix)
 	}
 }
 
@@ -118,7 +137,7 @@ func TestAPIKeyAuth_EmptyHeader(t *testing.T) {
 
 func TestAPIKeyAuth_InvalidKey(t *testing.T) {
 	fakeStore := &fakeAPIKeyStore{
-		getByHashErr: storage.ErrNotFound,
+		getByPrefixErr: storage.ErrNotFound,
 	}
 	handler := newAPIKeyMiddleware(fakeStore)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("handler must not be called")
@@ -136,19 +155,32 @@ func TestAPIKeyAuth_InvalidKey(t *testing.T) {
 
 func TestAPIKeyAuth_RevokedKey(t *testing.T) {
 	now := time.Now()
+	rawKey, prefix := generateTestAPIKey()
+
+	// Create a bcrypt hash using SHA-256 pre-hashing (same as implementation)
+	shaHash := sha256.Sum256([]byte(rawKey))
+	shaHex := hex.EncodeToString(shaHash[:])
+	bcryptHash, err := bcrypt.GenerateFromPassword([]byte(shaHex), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("failed to generate bcrypt hash: %v", err)
+	}
+
 	fakeStore := &fakeAPIKeyStore{
-		getByHashKey: domain.APIKey{
-			ID:        uuid.New(),
-			UserID:    uuid.New(),
-			Name:      "Revoked Key",
-			RevokedAt: &now,
+		getByPrefixKeys: []domain.APIKey{
+			{
+				ID:        uuid.New(),
+				UserID:    uuid.New(),
+				Name:      "Revoked Key",
+				KeyPrefix: prefix,
+				KeyHash:   string(bcryptHash),
+				RevokedAt: &now,
+			},
 		},
 	}
 	handler := newAPIKeyMiddleware(fakeStore)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("handler must not be called")
 	}))
 
-	rawKey, _, _ := generateTestAPIKey()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-API-Key", rawKey)
 	rec := httptest.NewRecorder()
@@ -172,5 +204,65 @@ func TestAPIKeyAuth_ErrorShapeIsStable(t *testing.T) {
 	}
 	if body["error"] != "unauthorized" {
 		t.Fatalf("error = %q, want unauthorized", body["error"])
+	}
+}
+
+// TestAPIKeyAuth_HashUsesBcrypt verifies that API key hashing uses bcrypt
+// instead of fast hashes like SHA-256. This is a security requirement to
+// prevent offline brute-force attacks if the database is compromised.
+func TestAPIKeyAuth_HashUsesBcrypt(t *testing.T) {
+	userID := uuid.New()
+
+	// Generate a raw key using the same format as production
+	b := make([]byte, 32)
+	_, _ = rand.Read(b)
+	rawKey := "nuntix_live_" + hex.EncodeToString(b)
+
+	// Create a bcrypt hash using SHA-256 pre-hashing (same as implementation)
+	shaHash := sha256.Sum256([]byte(rawKey))
+	shaHex := hex.EncodeToString(shaHash[:])
+	bcryptHash, err := bcrypt.GenerateFromPassword([]byte(shaHex), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("failed to generate bcrypt hash: %v", err)
+	}
+
+	prefix := "nuntix_live_" + hex.EncodeToString(b)[:8]
+
+	fakeStore := &fakeAPIKeyStore{
+		getByPrefixKeys: []domain.APIKey{
+			{
+				ID:        uuid.New(),
+				UserID:    userID,
+				Name:      "Test Key",
+				KeyPrefix: prefix,
+				KeyHash:   string(bcryptHash),
+			},
+		},
+	}
+	handler := newAPIKeyMiddleware(fakeStore)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen := UserIDFromContext(r.Context())
+		if seen != userID {
+			t.Fatalf("userID = %v, want %v", seen, userID)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-API-Key", rawKey)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	// Verify the store was called with the correct prefix
+	if fakeStore.lastPrefix != prefix {
+		t.Fatalf("store called with prefix %q, want %q", fakeStore.lastPrefix, prefix)
+	}
+
+	// Verify the bcrypt hash is valid for the SHA-256 pre-hashed key
+	if err := bcrypt.CompareHashAndPassword([]byte(bcryptHash), []byte(shaHex)); err != nil {
+		t.Fatalf("bcrypt hash validation failed: %v", err)
 	}
 }

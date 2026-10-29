@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/Carlos20052030/bookmarks-api/internal/middleware"
 	"github.com/Carlos20052030/bookmarks-api/internal/storage"
 	"github.com/google/uuid"
@@ -24,17 +26,30 @@ func NewAPIKeyHandler(store *storage.Store) *APIKeyHandler {
 	}
 }
 
-// GenerateRandomKey creates a raw key and its SHA-256 hash.
-func GenerateRandomKey() (string, string, string) {
+// GenerateRandomKey creates a raw key and its bcrypt hash of SHA-256.
+// Also returns the key prefix (first 8 hex chars after "nuntix_live_") for efficient lookup.
+// Uses SHA-256 pre-hashing before bcrypt to handle bcrypt's 72-byte input limit.
+func GenerateRandomKey() (rawKey, prefix, bcryptHash string, err error) {
 	b := make([]byte, 32)
-	_, _ = rand.Read(b)
-	rawKey := "nuntix_live_" + hex.EncodeToString(b)
-	prefix := "nuntix_live_"
+	_, err = rand.Read(b)
+	if err != nil {
+		return "", "", "", err
+	}
+	rawKey = "nuntix_live_" + hex.EncodeToString(b)
+	// Prefix for efficient lookup: "nuntix_live_" + first 8 hex chars
+	prefix = "nuntix_live_" + hex.EncodeToString(b)[:8]
 
-	hash := sha256.Sum256([]byte(rawKey))
-	hashString := hex.EncodeToString(hash[:])
+	// Pre-hash with SHA-256 to fit within bcrypt's 72-byte limit
+	shaHash := sha256.Sum256([]byte(rawKey))
+	shaHex := hex.EncodeToString(shaHash[:])
 
-	return rawKey, prefix, hashString
+	hash, err := bcrypt.GenerateFromPassword([]byte(shaHex), bcrypt.DefaultCost)
+	if err != nil {
+		return "", "", "", err
+	}
+	bcryptHash = string(hash)
+
+	return rawKey, prefix, bcryptHash, nil
 }
 
 // Create handles the POST /api-keys request.
@@ -56,9 +71,13 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.Name = "Default Key"
 	}
 
-	rawKey, prefix, hash := GenerateRandomKey()
+	rawKey, prefix, bcryptHash, err := GenerateRandomKey()
+	if err != nil {
+		http.Error(w, "Failed to generate key", http.StatusInternalServerError)
+		return
+	}
 
-	key, err := h.Store.CreateAPIKey(r.Context(), userID, req.Name, prefix, hash)
+	key, err := h.Store.CreateAPIKey(r.Context(), userID, req.Name, prefix, bcryptHash)
 	if err != nil {
 		http.Error(w, "Failed to create key", http.StatusInternalServerError)
 		return
