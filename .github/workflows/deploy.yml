@@ -36,7 +36,7 @@ jobs:
       - name: Run gosec security scan
         uses: securego/gosec@master
         with:
-          args: '-confidence=high -severity=critical ./...'
+          args: '-confidence=high -severity=high ./...'
 
   deploy:
     name: Deploy to VPS
