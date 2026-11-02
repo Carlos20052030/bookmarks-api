@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Carlos20052030/bookmarks-api/internal/billing/quota"
 	"github.com/Carlos20052030/bookmarks-api/internal/config"
 	"github.com/Carlos20052030/bookmarks-api/internal/dispatcher"
 	"github.com/Carlos20052030/bookmarks-api/internal/fetcher"
@@ -70,6 +71,9 @@ func main() {
 	// Initialize API Keys handler
 	apiKeyHandler := handler.NewAPIKeyHandler(store)
 
+	// Initialize quota service for billing
+	quotaSvc := quota.NewInMemoryQuotaService()
+
 	srv := server.New(
 		cfg.Server,
 		authHandler,
@@ -77,6 +81,7 @@ func main() {
 		tagHandler,
 		apiKeyHandler, // Pass the new handler to the server
 		store,         // Pass store for API Key auth
+		quotaSvc,      // Pass quota service for billing
 		cfg.JWT.Secret,
 		loginLimiter,
 		registerLimiter,

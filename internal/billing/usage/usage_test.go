@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -34,7 +35,7 @@ type mockDB struct {
 	activeWebhookCount int
 }
 
-func (m *mockDB) GetUserBillingInfo(userID string) (domain.Plan, domain.SubscriptionStatus, sql.NullTime, int, error) {
+func (m *mockDB) GetUserBillingInfo(ctx context.Context, userID string) (domain.Plan, domain.SubscriptionStatus, sql.NullTime, int, error) {
 	return m.userPlan, m.userStatus, m.userPeriodEnd, m.activeWebhookCount, nil
 }
 

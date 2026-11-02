@@ -9,6 +9,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Carlos20052030/bookmarks-api/internal/billing/checkout"
+	"github.com/Carlos20052030/bookmarks-api/internal/billing/quota"
+	"github.com/Carlos20052030/bookmarks-api/internal/billing/usage"
 	"github.com/Carlos20052030/bookmarks-api/internal/config"
 	"github.com/Carlos20052030/bookmarks-api/internal/handler"
 	"github.com/Carlos20052030/bookmarks-api/internal/middleware"
@@ -36,6 +39,7 @@ func New(
 	tagH *handler.TagHandler,
 	apiKeyH *handler.APIKeyHandler,
 	store *storage.Store, // <-- store para API Key auth
+	quotaSvc *quota.InMemoryQuotaService,
 	jwtSecret []byte,
 	loginLimiter *middleware.Limiter,
 	registerLimiter *middleware.Limiter,
@@ -81,6 +85,16 @@ func New(
 	mux.Handle("POST /api-keys", requireAuth(http.HandlerFunc(apiKeyH.Create)))
 	mux.Handle("GET /api-keys", requireAuth(http.HandlerFunc(apiKeyH.List)))
 	mux.Handle("DELETE /api-keys/{id}", requireAuth(http.HandlerFunc(apiKeyH.Revoke)))
+
+	// Billing routes
+	usageHandler := usage.NewHandler(quotaSvc, store)
+	checkoutHandler := checkout.NewHandler()
+
+	// Protected: billing usage (requires JWT auth)
+	mux.Handle("GET /billing/usage", requireAuth(http.HandlerFunc(usageHandler.ServeHTTP)))
+
+	// Public: billing checkout (could be protected, but currently doesn't require auth)
+	mux.Handle("GET /billing/checkout", http.HandlerFunc(checkoutHandler.ServeHTTP))
 
 	// Test route protected by API Key auth
 	mux.Handle("GET /api/me", requireAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

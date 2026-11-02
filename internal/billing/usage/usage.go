@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"log/slog"
@@ -18,7 +19,7 @@ type QuotaServiceInterface interface {
 
 // DBInterface defines the interface for database operations
 type DBInterface interface {
-	GetUserBillingInfo(userID string) (domain.Plan, domain.SubscriptionStatus, sql.NullTime, int, error)
+	GetUserBillingInfo(ctx context.Context, userID string) (domain.Plan, domain.SubscriptionStatus, sql.NullTime, int, error)
 }
 
 // UsageResponse represents the JSON response for the usage endpoint
@@ -63,7 +64,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user billing info from database
-	plan, _, periodEnd, webhookCount, err := h.db.GetUserBillingInfo(userID)
+	plan, _, periodEnd, webhookCount, err := h.db.GetUserBillingInfo(r.Context(), userID)
 	if err != nil {
 		h.logger.Error("failed to get user billing info", "error", err, "user_id", userID)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
