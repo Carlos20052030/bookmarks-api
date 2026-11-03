@@ -11,6 +11,8 @@ import (
 
 	"github.com/Carlos20052030/bookmarks-api/internal/billing/domain"
 	"github.com/Carlos20052030/bookmarks-api/internal/billing/quota"
+	"github.com/Carlos20052030/bookmarks-api/internal/middleware"
+	"github.com/google/uuid"
 )
 
 type mockQuotaService struct {
@@ -105,8 +107,10 @@ func TestUsageHandler_ReturnsCorrectJSON(t *testing.T) {
 
 			handler := NewHandler(mockQS, mockDB)
 
+			// Create a UUID for the user ID and set it in the context
+			userID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 			req := httptest.NewRequest(http.MethodGet, "/api/billing/usage", nil)
-			req.Header.Set("X-User-ID", "user-123")
+			req = req.WithContext(middleware.WithUserID(req.Context(), userID))
 			rr := httptest.NewRecorder()
 
 			handler.ServeHTTP(rr, req)
@@ -147,7 +151,7 @@ func TestUsageHandler_RequiresAuth(t *testing.T) {
 	handler := NewHandler(&mockQuotaService{}, &mockDB{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/billing/usage", nil)
-	// No X-User-ID header
+	// No user ID in context (simulates missing auth)
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -160,8 +164,9 @@ func TestUsageHandler_RequiresAuth(t *testing.T) {
 func TestUsageHandler_OnlyGETAllowed(t *testing.T) {
 	handler := NewHandler(&mockQuotaService{}, &mockDB{})
 
+	userID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 	req := httptest.NewRequest(http.MethodPost, "/api/billing/usage", nil)
-	req.Header.Set("X-User-ID", "user-123")
+	req = req.WithContext(middleware.WithUserID(req.Context(), userID))
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)

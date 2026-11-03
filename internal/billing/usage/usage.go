@@ -10,6 +10,8 @@ import (
 
 	"github.com/Carlos20052030/bookmarks-api/internal/billing/domain"
 	"github.com/Carlos20052030/bookmarks-api/internal/billing/quota"
+	"github.com/Carlos20052030/bookmarks-api/internal/middleware"
+	"github.com/google/uuid"
 )
 
 // QuotaServiceInterface defines the interface for quota checking
@@ -56,15 +58,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user ID from header (set by auth middleware)
-	userID := r.Header.Get("X-User-ID")
-	if userID == "" {
+	// Get user ID from context (set by auth middleware)
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == uuid.Nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	// Get user billing info from database
-	plan, _, periodEnd, webhookCount, err := h.db.GetUserBillingInfo(r.Context(), userID)
+	plan, _, periodEnd, webhookCount, err := h.db.GetUserBillingInfo(r.Context(), userID.String())
 	if err != nil {
 		h.logger.Error("failed to get user billing info", "error", err, "user_id", userID)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -72,7 +74,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get current usage from quota service
-	usage := h.quotaSvc.GetCurrentUsage(userID)
+	usage := h.quotaSvc.GetCurrentUsage(userID.String())
 
 	// Get plan quotas
 	quotas := domain.QuotasFor(plan)
