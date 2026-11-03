@@ -3,6 +3,7 @@ package webhook
 import (
 	"database/sql"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -37,9 +38,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read body
-	body := make([]byte, r.ContentLength)
-	if _, err := r.Body.Read(body); err != nil {
+	// Read raw body for Stripe signature verification
+	// Must use io.ReadAll to get the exact bytes Stripe signed
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		h.logger.Error("failed to read body", "error", err)
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
