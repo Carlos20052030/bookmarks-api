@@ -68,8 +68,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Quantity: stripe.Int64(1),
 			},
 		},
-		SuccessURL: stripe.String(h.baseURL + "/dashboard?checkout=success&session_id={CHECKOUT_SESSION_ID}"),
-		CancelURL:  stripe.String(h.baseURL + "/dashboard?checkout=canceled"),
+		SuccessURL: stripe.String("https://nuntix.com.br/billing?checkout=success"),
+		CancelURL:  stripe.String("https://nuntix.com.br/billing?checkout=canceled"),
 	})
 
 	if err != nil {
