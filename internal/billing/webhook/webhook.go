@@ -55,7 +55,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	event, err := webhook.ConstructEvent(body, sigHeader, h.secret)
+	event, err := webhook.ConstructEventWithOptions(body, sigHeader, h.secret, webhook.ConstructEventOptions{
+		IgnoreAPIVersionMismatch: true,
+	})
 	if err != nil {
 		h.logger.Warn("invalid Stripe signature", "error", err)
 		http.Error(w, "Invalid signature", http.StatusBadRequest)
