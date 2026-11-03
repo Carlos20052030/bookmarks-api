@@ -7,6 +7,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/Carlos20052030/bookmarks-api/internal/middleware"
+	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v79"
 )
 
@@ -46,8 +48,13 @@ func TestCheckoutHandler_InvalidPriceID(t *testing.T) {
 
 	handler := NewHandler()
 
+	// Create a test user ID
+	testUserID := uuid.New()
+
 	// Invalid price_id format
 	req := httptest.NewRequest(http.MethodGet, "/api/billing/checkout?price_id=invalid", nil)
+	// Add user ID to context (simulates Auth middleware)
+	req = req.WithContext(middleware.WithUserID(req.Context(), testUserID))
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -61,8 +68,13 @@ func TestCheckoutHandler_SuccessAndCancelURLs(t *testing.T) {
 
 	handler := NewHandler()
 
+	// Create a test user ID
+	testUserID := uuid.New()
+
 	// Verify the handler constructs correct success/cancel URLs
 	req := httptest.NewRequest(http.MethodGet, "/api/billing/checkout?price_id=price_test_brl", nil)
+	// Add user ID to context (simulates Auth middleware)
+	req = req.WithContext(middleware.WithUserID(req.Context(), testUserID))
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 

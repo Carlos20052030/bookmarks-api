@@ -145,6 +145,13 @@ func (h *Handler) handleCheckoutSessionCompleted(event stripe.Event) error {
 		return nil // Not a subscription checkout
 	}
 
+	// Get user ID from ClientReferenceID (set during checkout creation)
+	userID := session.ClientReferenceID
+	if userID == "" {
+		h.logger.Warn("checkout.session.completed: missing ClientReferenceID")
+		return nil // Can't identify user, skip
+	}
+
 	customerID := session.Customer.ID
 	subscriptionID := session.Subscription.ID
 
@@ -152,21 +159,26 @@ func (h *Handler) handleCheckoutSessionCompleted(event stripe.Event) error {
 	var periodEnd sql.NullTime
 	_ = periodEnd // We'll update when we have the subscription object
 
-	// Update user: set plan=pro, status=active, stripe_customer_id
-	_, err := h.db.Exec(
+	// Update user by ID (from ClientReferenceID)
+	result, err := h.db.Exec(
 		`UPDATE users
 		 SET plan = $1, subscription_status = $2, stripe_customer_id = $3, current_period_end = $4
-		 WHERE stripe_customer_id = $5 OR id = (SELECT id FROM users WHERE stripe_customer_id = $6)`,
-		domain.PlanPro.String(), domain.SubscriptionStatusActive.String(), customerID, periodEnd, customerID, customerID,
+		 WHERE id = $5`,
+		domain.PlanPro.String(), domain.SubscriptionStatusActive.String(), customerID, periodEnd, userID,
 	)
 
-	// If no rows updated, customer might not exist yet - we'd need to link via email or metadata
-	// For now, just log
 	if err != nil {
+		h.logger.Error("checkout.session.completed: failed to update user", "error", err, "user_id", userID, "customer", customerID)
 		return err
 	}
 
-	h.logger.Info("checkout completed", "customer", customerID, "subscription", subscriptionID)
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		h.logger.Warn("checkout.session.completed: no user found with ID", "user_id", userID)
+		return nil
+	}
+
+	h.logger.Info("checkout completed", "user_id", userID, "customer", customerID, "subscription", subscriptionID)
 	return nil
 }
 

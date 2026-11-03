@@ -97,8 +97,8 @@ func New(
 	// Protected: billing usage (requires JWT auth)
 	mux.Handle("GET /billing/usage", requireAuth(http.HandlerFunc(usageHandler.ServeHTTP)))
 
-	// Public: billing checkout (could be protected, but currently doesn't require auth)
-	mux.Handle("GET /billing/checkout", http.HandlerFunc(checkoutHandler.ServeHTTP))
+	// Protected: billing checkout (requires JWT auth to get user ID)
+	mux.Handle("GET /billing/checkout", requireAuth(http.HandlerFunc(checkoutHandler.ServeHTTP)))
 
 	// Public: Stripe webhook (no auth - Stripe doesn't send JWT)
 	mux.Handle("POST /billing/stripe-webhook", http.HandlerFunc(webhookHandler.ServeHTTP))

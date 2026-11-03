@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Carlos20052030/bookmarks-api/internal/middleware"
+	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v79"
 	"github.com/stripe/stripe-go/v79/checkout/session"
 )
@@ -39,6 +41,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get user ID from context (set by Auth middleware)
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == uuid.Nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	// Get price_id from query string
 	priceID := r.URL.Query().Get("price_id")
 
@@ -59,7 +68,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Set Stripe key for this request
 	stripe.Key = h.stripeKey
 
-	// Create checkout session
+	// Create checkout session with user ID as ClientReferenceID
 	sess, err := session.New(&stripe.CheckoutSessionParams{
 		Mode: stripe.String(string(stripe.CheckoutSessionModeSubscription)),
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
@@ -68,8 +77,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Quantity: stripe.Int64(1),
 			},
 		},
-		SuccessURL: stripe.String("https://nuntix.com.br/billing?checkout=success"),
-		CancelURL:  stripe.String("https://nuntix.com.br/billing?checkout=canceled"),
+		SuccessURL:        stripe.String("https://nuntix.com.br/billing?checkout=success"),
+		CancelURL:         stripe.String("https://nuntix.com.br/billing?checkout=canceled"),
+		ClientReferenceID: stripe.String(userID.String()),
 	})
 
 	if err != nil {
