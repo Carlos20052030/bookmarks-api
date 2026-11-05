@@ -53,24 +53,24 @@ func (h *TagHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	var req tagCreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json", "request body is not valid json")
+		writeError(w, http.StatusBadRequest, "invalid_json", "Corpo da requisição não é JSON válido")
 		return
 	}
 
 	name := strings.TrimSpace(req.Name)
 	if len(name) < minTagNameLen {
-		writeError(w, http.StatusBadRequest, "invalid_name", "name is required")
+		writeError(w, http.StatusBadRequest, "invalid_name", "Nome é obrigatório")
 		return
 	}
 	if len(name) > maxTagNameLen {
-		writeError(w, http.StatusBadRequest, "invalid_name", "name must be at most 50 characters")
+		writeError(w, http.StatusBadRequest, "invalid_name", "Nome deve ter no máximo 50 caracteres")
 		return
 	}
 
 	tag, err := h.store.CreateTag(r.Context(), userID, name)
 	if err != nil {
 		if errors.Is(err, storage.ErrTagNameTaken) {
-			writeError(w, http.StatusConflict, "tag_name_taken", "a tag with this name already exists")
+			writeError(w, http.StatusConflict, "tag_name_taken", "Já existe uma tag com este nome")
 			return
 		}
 		h.logger.Error("create tag", "err", err)

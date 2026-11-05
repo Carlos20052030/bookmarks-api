@@ -37,14 +37,14 @@ func NewHandler() *Handler {
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
 		return
 	}
 
 	// Get user ID from context (set by Auth middleware)
 	userID := middleware.UserIDFromContext(r.Context())
 	if userID == uuid.Nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		http.Error(w, "Não autorizado", http.StatusUnauthorized)
 		return
 	}
 
@@ -60,7 +60,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Validate price_id format
 	valid, validatedPriceID := parsePriceID(priceID)
 	if !valid {
-		http.Error(w, "Invalid price_id format", http.StatusBadRequest)
+		http.Error(w, "Formato de price_id inválido", http.StatusBadRequest)
 		return
 	}
 	priceID = validatedPriceID
@@ -84,7 +84,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		h.logger.Error("failed to create checkout session", "error", err, "price_id", priceID)
-		http.Error(w, "Failed to create checkout session", http.StatusInternalServerError)
+		http.Error(w, "Falha ao criar sessão de checkout", http.StatusInternalServerError)
 		return
 	}
 

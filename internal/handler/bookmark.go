@@ -135,14 +135,14 @@ func (h *BookmarkHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	var req bookmarkRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json", "request body is not valid json")
+		writeError(w, http.StatusBadRequest, "invalid_json", "Corpo da requisição não é JSON válido")
 		return
 	}
 
 	req.URL = strings.TrimSpace(req.URL)
 	req.Title = strings.TrimSpace(req.Title)
 	if !validURL(req.URL) {
-		writeError(w, http.StatusBadRequest, "invalid_url", "url must be an absolute http or https URL")
+		writeError(w, http.StatusBadRequest, "invalid_url", "URL deve ser um endereço http ou https absoluto")
 		return
 	}
 
@@ -229,7 +229,7 @@ func (h *BookmarkHandler) List(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > maxLimit {
-			writeError(w, http.StatusBadRequest, "invalid_limit", "limit must be between 1 and 100")
+			writeError(w, http.StatusBadRequest, "invalid_limit", "Limite deve estar entre 1 e 100")
 			return
 		}
 		limit = n
@@ -239,7 +239,7 @@ func (h *BookmarkHandler) List(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("offset"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
-			writeError(w, http.StatusBadRequest, "invalid_offset", "offset must be >= 0")
+			writeError(w, http.StatusBadRequest, "invalid_offset", "Deslocamento deve ser maior ou igual a 0")
 			return
 		}
 		offset = n
@@ -249,7 +249,7 @@ func (h *BookmarkHandler) List(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("tag"); v != "" {
 		parsed, err := uuid.Parse(v)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_tag", "tag must be a valid uuid")
+			writeError(w, http.StatusBadRequest, "invalid_tag", "Tag deve ser um UUID válido")
 			return
 		}
 		tagID = parsed
@@ -289,14 +289,14 @@ func (h *BookmarkHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	var req bookmarkRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json", "request body is not valid json")
+		writeError(w, http.StatusBadRequest, "invalid_json", "Corpo da requisição não é JSON válido")
 		return
 	}
 
 	req.URL = strings.TrimSpace(req.URL)
 	req.Title = strings.TrimSpace(req.Title)
 	if !validURL(req.URL) {
-		writeError(w, http.StatusBadRequest, "invalid_url", "url must be an absolute http or https URL")
+		writeError(w, http.StatusBadRequest, "invalid_url", "URL deve ser um endereço http ou https absoluto")
 		return
 	}
 

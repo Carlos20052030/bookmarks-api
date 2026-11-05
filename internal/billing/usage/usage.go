@@ -54,14 +54,14 @@ func NewHandler(quotaSvc QuotaServiceInterface, db DBInterface) *Handler {
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
 		return
 	}
 
 	// Get user ID from context (set by auth middleware)
 	userID := middleware.UserIDFromContext(r.Context())
 	if userID == uuid.Nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		http.Error(w, "Não autorizado", http.StatusUnauthorized)
 		return
 	}
 
@@ -69,7 +69,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	plan, _, periodEnd, webhookCount, err := h.db.GetUserBillingInfo(r.Context(), userID.String())
 	if err != nil {
 		h.logger.Error("failed to get user billing info", "error", err, "user_id", userID)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
 		return
 	}
 

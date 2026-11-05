@@ -56,7 +56,7 @@ func GenerateRandomKey() (rawKey, prefix, bcryptHash string, err error) {
 func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromContext(r.Context())
 	if userID == uuid.Nil {
-		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+		http.Error(w, "ID de usuário inválido", http.StatusUnauthorized)
 		return
 	}
 
@@ -64,7 +64,7 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		http.Error(w, "Corpo da requisição inválido", http.StatusBadRequest)
 		return
 	}
 	if req.Name == "" {
@@ -73,13 +73,13 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	rawKey, prefix, bcryptHash, err := GenerateRandomKey()
 	if err != nil {
-		http.Error(w, "Failed to generate key", http.StatusInternalServerError)
+		http.Error(w, "Falha ao gerar chave", http.StatusInternalServerError)
 		return
 	}
 
 	key, err := h.Store.CreateAPIKey(r.Context(), userID, req.Name, prefix, bcryptHash)
 	if err != nil {
-		http.Error(w, "Failed to create key", http.StatusInternalServerError)
+		http.Error(w, "Falha ao criar chave", http.StatusInternalServerError)
 		return
 	}
 
@@ -97,13 +97,13 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *APIKeyHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromContext(r.Context())
 	if userID == uuid.Nil {
-		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+		http.Error(w, "ID de usuário inválido", http.StatusUnauthorized)
 		return
 	}
 
 	keys, err := h.Store.ListAPIKeys(r.Context(), userID)
 	if err != nil {
-		http.Error(w, "Failed to list keys", http.StatusInternalServerError)
+		http.Error(w, "Falha ao listar chaves", http.StatusInternalServerError)
 		return
 	}
 
@@ -115,14 +115,14 @@ func (h *APIKeyHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *APIKeyHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromContext(r.Context())
 	if userID == uuid.Nil {
-		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+		http.Error(w, "ID de usuário inválido", http.StatusUnauthorized)
 		return
 	}
 
 	keyIDStr := r.PathValue("id")
 	keyID, err := uuid.Parse(keyIDStr)
 	if err != nil {
-		http.Error(w, "Invalid key ID", http.StatusBadRequest)
+		http.Error(w, "ID da chave inválido", http.StatusBadRequest)
 		return
 	}
 

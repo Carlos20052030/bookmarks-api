@@ -93,11 +93,11 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	email := normalizeEmail(req.Email)
 	if !validEmail(email) {
-		writeError(w, http.StatusBadRequest, "invalid_email", "email is malformed")
+		writeError(w, http.StatusBadRequest, "invalid_email", "E-mail inválido")
 		return
 	}
 	if len(req.Password) < minPasswordLen {
-		writeError(w, http.StatusBadRequest, "weak_password", "password must be at least 8 characters")
+		writeError(w, http.StatusBadRequest, "weak_password", "A senha deve ter pelo menos 8 caracteres")
 		return
 	}
 
@@ -111,7 +111,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	user, err := h.store.CreateUser(r.Context(), email, hash)
 	if err != nil {
 		if errors.Is(err, storage.ErrEmailTaken) {
-			writeError(w, http.StatusConflict, "email_taken", "email already registered")
+			writeError(w, http.StatusConflict, "email_taken", "E-mail já cadastrado")
 			return
 		}
 		h.logger.Error("create user", "err", err)
@@ -178,13 +178,13 @@ type loginRequest struct {
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json", "request body is not valid json")
+		writeError(w, http.StatusBadRequest, "invalid_json", "Corpo da requisição não é JSON válido")
 		return
 	}
 
 	email := normalizeEmail(req.Email)
 	if email == "" || req.Password == "" {
-		writeError(w, http.StatusBadRequest, "missing_fields", "email and password are required")
+		writeError(w, http.StatusBadRequest, "missing_fields", "E-mail e senha são obrigatórios")
 		return
 	}
 
@@ -195,7 +195,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			// fail with the same response. Do not leak that the user
 			// is unknown.
 			_ = auth.CheckPassword(string(dummyHash), req.Password)
-			writeError(w, http.StatusUnauthorized, "invalid_credentials", "email or password is incorrect")
+			writeError(w, http.StatusUnauthorized, "invalid_credentials", "E-mail ou senha incorretos")
 			return
 		}
 		h.logger.Error("get user by email", "err", err)
@@ -204,7 +204,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := auth.CheckPassword(user.PasswordHash, req.Password); err != nil {
-		writeError(w, http.StatusUnauthorized, "invalid_credentials", "email or password is incorrect")
+		writeError(w, http.StatusUnauthorized, "invalid_credentials", "E-mail ou senha incorretos")
 		return
 	}
 
@@ -246,11 +246,11 @@ type refreshResponse struct {
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json", "request body is not valid json")
+		writeError(w, http.StatusBadRequest, "invalid_json", "Corpo da requisição não é JSON válido")
 		return
 	}
 	if req.RefreshToken == "" {
-		writeError(w, http.StatusBadRequest, "missing_fields", "refresh_token is required")
+		writeError(w, http.StatusBadRequest, "missing_fields", "refresh_token é obrigatório")
 		return
 	}
 
@@ -309,11 +309,11 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json", "request body is not valid json")
+		writeError(w, http.StatusBadRequest, "invalid_json", "Corpo da requisição não é JSON válido")
 		return
 	}
 	if req.RefreshToken == "" {
-		writeError(w, http.StatusBadRequest, "missing_fields", "refresh_token is required")
+		writeError(w, http.StatusBadRequest, "missing_fields", "refresh_token é obrigatório")
 		return
 	}
 

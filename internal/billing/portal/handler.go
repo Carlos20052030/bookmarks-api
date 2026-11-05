@@ -27,13 +27,13 @@ func NewHandler(db *sql.DB) *Handler {
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
 		return
 	}
 
 	userID := middleware.UserIDFromContext(r.Context())
 	if userID == uuid.Nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		http.Error(w, "Não autorizado", http.StatusUnauthorized)
 		return
 	}
 
@@ -46,11 +46,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if err == sql.ErrNoRows {
 			h.logger.Warn("user not found", "user_id", userID)
-			http.Error(w, "User not found", http.StatusNotFound)
+			http.Error(w, "Usuário não encontrado", http.StatusNotFound)
 			return
 		}
 		h.logger.Error("failed to query user", "error", err, "user_id", userID)
-		http.Error(w, "Internal error", http.StatusInternalServerError)
+		http.Error(w, "Erro interno", http.StatusInternalServerError)
 		return
 	}
 
@@ -71,7 +71,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.logger.Error("failed to create portal session", "error", err, "customer_id", customerID.String)
-		http.Error(w, "Failed to create portal session", http.StatusInternalServerError)
+		http.Error(w, "Falha ao criar sessão do portal", http.StatusInternalServerError)
 		return
 	}
 
