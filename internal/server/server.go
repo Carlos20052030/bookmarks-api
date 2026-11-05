@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Carlos20052030/bookmarks-api/internal/billing/checkout"
+	"github.com/Carlos20052030/bookmarks-api/internal/billing/portal"
 	"github.com/Carlos20052030/bookmarks-api/internal/billing/quota"
 	"github.com/Carlos20052030/bookmarks-api/internal/billing/usage"
 	"github.com/Carlos20052030/bookmarks-api/internal/billing/webhook"
@@ -92,6 +93,7 @@ func New(
 	// Billing routes
 	usageHandler := usage.NewHandler(quotaSvc, store)
 	checkoutHandler := checkout.NewHandler()
+	portalHandler := portal.NewHandler(db)
 	webhookHandler := webhook.NewHandler(db)
 
 	// Protected: billing usage (requires JWT auth)
@@ -99,6 +101,9 @@ func New(
 
 	// Protected: billing checkout (requires JWT auth to get user ID)
 	mux.Handle("GET /billing/checkout", requireAuth(http.HandlerFunc(checkoutHandler.ServeHTTP)))
+
+	// Protected: billing portal (requires JWT auth to get user ID)
+	mux.Handle("POST /billing/portal", requireAuth(http.HandlerFunc(portalHandler.ServeHTTP)))
 
 	// Public: Stripe webhook (no auth - Stripe doesn't send JWT)
 	mux.Handle("POST /billing/stripe-webhook", http.HandlerFunc(webhookHandler.ServeHTTP))
