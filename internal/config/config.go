@@ -21,6 +21,7 @@ type Config struct {
 
 	DispatcherURL string
 	IngestToken   string
+	ResendAPIKey  string
 }
 
 type ServerConfig struct {
@@ -56,6 +57,7 @@ func Load() (*Config, error) {
 
 		DispatcherURL: getEnv("DISPATCHER_URL", "http://localhost:8080"), // Default local
 		IngestToken:   os.Getenv("INGEST_TOKEN"),
+		ResendAPIKey:  os.Getenv("RESEND_API_KEY"),
 	}
 
 	if v := os.Getenv("SERVER_PORT"); v != "" {

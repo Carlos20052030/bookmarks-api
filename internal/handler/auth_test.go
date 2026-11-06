@@ -14,6 +14,7 @@ import (
 
 	"github.com/Carlos20052030/bookmarks-api/internal/auth" // IMPORTANTE: Adicionado
 	"github.com/Carlos20052030/bookmarks-api/internal/domain"
+	"github.com/Carlos20052030/bookmarks-api/internal/email"
 	"github.com/Carlos20052030/bookmarks-api/internal/storage"
 	"github.com/google/uuid"
 )
@@ -40,6 +41,17 @@ type fakeStore struct {
 
 	getRefreshTokenByHashErr   error
 	getRefreshTokenByHashToken domain.RefreshToken
+
+	// Password reset fields
+	createPasswordResetErr    error
+	getPasswordResetByTokenErr error
+	getPasswordResetByToken    storage.PasswordReset
+	markPasswordResetUsedErr   error
+	updateUserPasswordErr      error
+	lastPasswordResetUserID   uuid.UUID
+	lastPasswordResetToken    string
+	lastUpdateUserPasswordID  uuid.UUID
+	lastUpdateUserPasswordHash string
 }
 
 func (f *fakeStore) GetUserByEmail(_ context.Context, _ string) (domain.User, error) {
@@ -90,8 +102,34 @@ func (f *fakeStore) RevokeAllUserTokens(_ context.Context, userID uuid.UUID) err
 	return f.revokeAllUserTokensErr
 }
 
-func newTestAuthHandler(fs *fakeStore) *AuthHandler {
-	return NewAuthHandler(fs, testSecret, discardLogger())
+func (f *fakeStore) CreatePasswordReset(_ context.Context, userID uuid.UUID, token string, _ time.Time) (storage.PasswordReset, error) {
+	f.lastPasswordResetUserID = userID
+	f.lastPasswordResetToken = token
+	if f.createPasswordResetErr != nil {
+		return storage.PasswordReset{}, f.createPasswordResetErr
+	}
+	return storage.PasswordReset{ID: uuid.New(), UserID: userID, Token: token}, nil
+}
+
+func (f *fakeStore) GetPasswordResetByToken(_ context.Context, token string) (storage.PasswordReset, error) {
+	if f.getPasswordResetByTokenErr != nil {
+		return storage.PasswordReset{}, f.getPasswordResetByTokenErr
+	}
+	return f.getPasswordResetByToken, nil
+}
+
+func (f *fakeStore) MarkPasswordResetUsed(_ context.Context, _ uuid.UUID) error {
+	return f.markPasswordResetUsedErr
+}
+
+func (f *fakeStore) UpdateUserPassword(_ context.Context, userID uuid.UUID, hash string) error {
+	f.lastUpdateUserPasswordID = userID
+	f.lastUpdateUserPasswordHash = hash
+	return f.updateUserPasswordErr
+}
+
+func newTestAuthHandler(fs *fakeStore, emailClient *email.ResendClient) *AuthHandler {
+	return NewAuthHandler(fs, emailClient, testSecret, discardLogger())
 }
 
 func postJSON(t *testing.T, h http.HandlerFunc, body string) *httptest.ResponseRecorder {
@@ -118,7 +156,7 @@ func assertErrorCode(t *testing.T, rec *httptest.ResponseRecorder, code string) 
 
 func TestRegister_Success(t *testing.T) {
 	fs := &fakeStore{}
-	h := newTestAuthHandler(fs)
+	h := newTestAuthHandler(fs, nil)
 
 	rec := postJSON(t, h.Register, `{"email":"Alice@Example.com","password":"correct horse"}`)
 
@@ -152,7 +190,7 @@ func TestRegister_Success(t *testing.T) {
 }
 
 func TestRegister_InvalidJSON(t *testing.T) {
-	h := newTestAuthHandler(&fakeStore{})
+	h := newTestAuthHandler(&fakeStore{}, nil)
 	rec := postJSON(t, h.Register, `{not json`)
 
 	if rec.Code != http.StatusBadRequest {
@@ -162,7 +200,7 @@ func TestRegister_InvalidJSON(t *testing.T) {
 }
 
 func TestRegister_InvalidEmail(t *testing.T) {
-	h := newTestAuthHandler(&fakeStore{})
+	h := newTestAuthHandler(&fakeStore{}, nil)
 	rec := postJSON(t, h.Register, `{"email":"not-an-email","password":"longenough"}`)
 
 	if rec.Code != http.StatusBadRequest {
@@ -172,7 +210,7 @@ func TestRegister_InvalidEmail(t *testing.T) {
 }
 
 func TestRegister_WeakPassword(t *testing.T) {
-	h := newTestAuthHandler(&fakeStore{})
+	h := newTestAuthHandler(&fakeStore{}, nil)
 	rec := postJSON(t, h.Register, `{"email":"a@b.com","password":"short"}`)
 
 	if rec.Code != http.StatusBadRequest {
@@ -183,7 +221,7 @@ func TestRegister_WeakPassword(t *testing.T) {
 
 func TestRegister_EmailTaken(t *testing.T) {
 	fs := &fakeStore{createUserErr: storage.ErrEmailTaken}
-	h := newTestAuthHandler(fs)
+	h := newTestAuthHandler(fs, nil)
 	rec := postJSON(t, h.Register, `{"email":"a@b.com","password":"longenough"}`)
 
 	if rec.Code != http.StatusConflict {
@@ -194,7 +232,7 @@ func TestRegister_EmailTaken(t *testing.T) {
 
 func TestRegister_StoreFailure(t *testing.T) {
 	fs := &fakeStore{createUserErr: errors.New("db down")}
-	h := newTestAuthHandler(fs)
+	h := newTestAuthHandler(fs, nil)
 	rec := postJSON(t, h.Register, `{"email":"a@b.com","password":"longenough"}`)
 
 	if rec.Code != http.StatusInternalServerError {
@@ -205,7 +243,7 @@ func TestRegister_StoreFailure(t *testing.T) {
 
 func TestRegister_RefreshTokenFailure(t *testing.T) {
 	fs := &fakeStore{createRefreshTokenErr: errors.New("db down")}
-	h := newTestAuthHandler(fs)
+	h := newTestAuthHandler(fs, nil)
 	rec := postJSON(t, h.Register, `{"email":"a@b.com","password":"longenough"}`)
 
 	if rec.Code != http.StatusInternalServerError {
@@ -228,7 +266,7 @@ func TestLogin_Success(t *testing.T) {
 		CreatedAt:    time.Now(),
 	}
 	fs := &fakeStore{getUserByEmailUser: user}
-	h := newTestAuthHandler(fs)
+	h := newTestAuthHandler(fs, nil)
 
 	rec := postJSON(t, h.Login, `{"email":"ALICE@example.com","password":"correct horse"}`)
 
@@ -249,7 +287,7 @@ func TestLogin_Success(t *testing.T) {
 
 func TestLogin_UnknownEmail(t *testing.T) {
 	fs := &fakeStore{getUserByEmailErr: storage.ErrNotFound}
-	h := newTestAuthHandler(fs)
+	h := newTestAuthHandler(fs, nil)
 
 	rec := postJSON(t, h.Login, `{"email":"nobody@example.com","password":"whatever"}`)
 
@@ -266,7 +304,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 	}
 	user := domain.User{ID: uuid.New(), Email: "a@b.com", PasswordHash: hash}
 	fs := &fakeStore{getUserByEmailUser: user}
-	h := newTestAuthHandler(fs)
+	h := newTestAuthHandler(fs, nil)
 
 	rec := postJSON(t, h.Login, `{"email":"a@b.com","password":"wrong password"}`)
 
@@ -281,8 +319,8 @@ func TestLogin_SameErrorForUnknownEmailAndWrongPassword(t *testing.T) {
 	hash, _ := auth.HashPassword("correct horse")
 	existing := domain.User{ID: uuid.New(), Email: "a@b.com", PasswordHash: hash}
 
-	h1 := newTestAuthHandler(&fakeStore{getUserByEmailErr: storage.ErrNotFound})
-	h2 := newTestAuthHandler(&fakeStore{getUserByEmailUser: existing})
+	h1 := newTestAuthHandler(&fakeStore{getUserByEmailErr: storage.ErrNotFound}, nil)
+	h2 := newTestAuthHandler(&fakeStore{getUserByEmailUser: existing}, nil)
 
 	rec1 := postJSON(t, h1.Login, `{"email":"x@y.com","password":"any"}`)
 	rec2 := postJSON(t, h2.Login, `{"email":"a@b.com","password":"wrong"}`)
@@ -296,7 +334,7 @@ func TestLogin_SameErrorForUnknownEmailAndWrongPassword(t *testing.T) {
 }
 
 func TestLogin_MissingFields(t *testing.T) {
-	h := newTestAuthHandler(&fakeStore{})
+	h := newTestAuthHandler(&fakeStore{}, nil)
 
 	for _, body := range []string{
 		`{"email":"","password":"x"}`,
@@ -337,7 +375,7 @@ func newStoreWithValidToken(t *testing.T) (*fakeStore, string) {
 
 func TestRefresh_Success(t *testing.T) {
 	fs, plain := newStoreWithValidToken(t)
-	h := newTestAuthHandler(fs)
+	h := newTestAuthHandler(fs, nil)
 
 	rec := postJSON(t, h.Refresh, `{"refresh_token":"`+plain+`"}`)
 
@@ -355,7 +393,7 @@ func TestRefresh_Success(t *testing.T) {
 
 func TestRefresh_NotFound(t *testing.T) {
 	fs := &fakeStore{getRefreshTokenByHashErr: storage.ErrNotFound}
-	h := newTestAuthHandler(fs)
+	h := newTestAuthHandler(fs, nil)
 
 	rec := postJSON(t, h.Refresh, `{"refresh_token":"whatever"}`)
 
@@ -369,7 +407,7 @@ func TestRefresh_RevokedTokenTriggersRevokeAll(t *testing.T) {
 	fs, plain := newStoreWithValidToken(t)
 	revoked := time.Now().Add(-time.Minute)
 	fs.getRefreshTokenByHashToken.RevokedAt = &revoked
-	h := newTestAuthHandler(fs)
+	h := newTestAuthHandler(fs, nil)
 
 	rec := postJSON(t, h.Refresh, `{"refresh_token":"`+plain+`"}`)
 
@@ -389,7 +427,7 @@ func TestRefresh_RevokedTokenTriggersRevokeAll(t *testing.T) {
 func TestRefresh_ExpiredToken(t *testing.T) {
 	fs, plain := newStoreWithValidToken(t)
 	fs.getRefreshTokenByHashToken.ExpiresAt = time.Now().Add(-time.Hour)
-	h := newTestAuthHandler(fs)
+	h := newTestAuthHandler(fs, nil)
 
 	rec := postJSON(t, h.Refresh, `{"refresh_token":"`+plain+`"}`)
 	if rec.Code != http.StatusUnauthorized {
@@ -398,7 +436,7 @@ func TestRefresh_ExpiredToken(t *testing.T) {
 }
 
 func TestRefresh_MissingToken(t *testing.T) {
-	h := newTestAuthHandler(&fakeStore{})
+	h := newTestAuthHandler(&fakeStore{}, nil)
 	rec := postJSON(t, h.Refresh, `{}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
@@ -410,7 +448,7 @@ func TestRefresh_MissingToken(t *testing.T) {
 
 func TestLogout_Success(t *testing.T) {
 	fs, plain := newStoreWithValidToken(t)
-	h := newTestAuthHandler(fs)
+	h := newTestAuthHandler(fs, nil)
 
 	rec := postJSON(t, h.Logout, `{"refresh_token":"`+plain+`"}`)
 	if rec.Code != http.StatusNoContent {
@@ -420,7 +458,7 @@ func TestLogout_Success(t *testing.T) {
 
 func TestLogout_IdempotentWhenTokenUnknown(t *testing.T) {
 	fs := &fakeStore{getRefreshTokenByHashErr: storage.ErrNotFound}
-	h := newTestAuthHandler(fs)
+	h := newTestAuthHandler(fs, nil)
 
 	rec := postJSON(t, h.Logout, `{"refresh_token":"never-existed"}`)
 	if rec.Code != http.StatusNoContent {
@@ -429,10 +467,244 @@ func TestLogout_IdempotentWhenTokenUnknown(t *testing.T) {
 }
 
 func TestLogout_MissingToken(t *testing.T) {
-	h := newTestAuthHandler(&fakeStore{})
+	h := newTestAuthHandler(&fakeStore{}, nil)
 	rec := postJSON(t, h.Logout, `{}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 	assertErrorCode(t, rec, "missing_fields")
+}
+
+// --- Testes de ForgotPassword ---
+
+func TestForgotPassword_Success(t *testing.T) {
+	hash, err := auth.HashPassword("correct horse")
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	user := domain.User{ID: uuid.New(), Email: "alice@example.com", PasswordHash: hash}
+
+	fs := &fakeStore{
+		getUserByEmailUser: user,
+	}
+	h := newTestAuthHandler(fs, nil)
+
+	rec := postJSON(t, h.ForgotPassword, `{"email":"ALICE@example.com"}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["message"] != "Se o e-mail existir, enviaremos instruções para redefinir a senha" {
+		t.Fatalf("message = %q", resp["message"])
+	}
+
+	// Verify that a token was created for the user
+	if fs.lastPasswordResetUserID != user.ID {
+		t.Fatal("password reset was not created for the user")
+	}
+	if fs.lastPasswordResetToken == "" {
+		t.Fatal("password reset token is empty")
+	}
+	if len(fs.lastPasswordResetToken) != 64 { // 32 bytes = 64 hex chars
+		t.Fatalf("token length = %d, want 64", len(fs.lastPasswordResetToken))
+	}
+}
+
+func TestForgotPassword_UnknownEmail(t *testing.T) {
+	fs := &fakeStore{getUserByEmailErr: storage.ErrNotFound}
+	h := newTestAuthHandler(fs, nil)
+
+	rec := postJSON(t, h.ForgotPassword, `{"email":"nobody@example.com"}`)
+
+	// Must return 200 OK to prevent email enumeration
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["message"] != "Se o e-mail existir, enviaremos instruções para redefinir a senha" {
+		t.Fatalf("message = %q", resp["message"])
+	}
+}
+
+func TestForgotPassword_InvalidEmail(t *testing.T) {
+	h := newTestAuthHandler(&fakeStore{}, nil)
+	rec := postJSON(t, h.ForgotPassword, `{"email":"not-an-email"}`)
+
+	// Must return 200 OK to prevent email enumeration
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestForgotPassword_InvalidJSON(t *testing.T) {
+	h := newTestAuthHandler(&fakeStore{}, nil)
+	rec := postJSON(t, h.ForgotPassword, `{not json`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	assertErrorCode(t, rec, "invalid_json")
+}
+
+func TestForgotPassword_StoreFailure(t *testing.T) {
+	hash, err := auth.HashPassword("correct horse")
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	user := domain.User{ID: uuid.New(), Email: "alice@example.com", PasswordHash: hash}
+
+	fs := &fakeStore{
+		getUserByEmailUser:     user,
+		createPasswordResetErr: errors.New("db down"),
+	}
+	h := newTestAuthHandler(fs, nil)
+
+	rec := postJSON(t, h.ForgotPassword, `{"email":"alice@example.com"}`)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	assertErrorCode(t, rec, "internal_error")
+}
+
+// --- Testes de ResetPassword ---
+
+func TestResetPassword_Success(t *testing.T) {
+	hash, err := auth.HashPassword("old password")
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	user := domain.User{ID: uuid.New(), Email: "alice@example.com", PasswordHash: hash}
+
+	resetToken := storage.PasswordReset{
+		ID:        uuid.New(),
+		UserID:    user.ID,
+		Token:     "valid-token-123",
+		ExpiresAt: time.Now().Add(time.Hour),
+		UsedAt:    nil,
+	}
+
+	fs := &fakeStore{
+		getPasswordResetByToken: resetToken,
+	}
+	h := newTestAuthHandler(fs, nil)
+
+	rec := postJSON(t, h.ResetPassword, `{"token":"valid-token-123","new_password":"new password 123"}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["message"] != "Senha redefinida com sucesso" {
+		t.Fatalf("message = %q", resp["message"])
+	}
+
+	// Verify password was updated
+	if fs.lastUpdateUserPasswordID != user.ID {
+		t.Fatal("password was not updated for the user")
+	}
+	if fs.lastUpdateUserPasswordHash == "" {
+		t.Fatal("new password hash is empty")
+	}
+	if fs.lastUpdateUserPasswordHash == "old password" {
+		t.Fatal("password was stored in plaintext")
+	}
+
+	// Verify token was marked as used
+	if fs.markPasswordResetUsedErr != nil {
+		t.Fatal("mark password reset used was called with error")
+	}
+}
+
+func TestResetPassword_InvalidToken(t *testing.T) {
+	fs := &fakeStore{getPasswordResetByTokenErr: storage.ErrNotFound}
+	h := newTestAuthHandler(fs, nil)
+
+	rec := postJSON(t, h.ResetPassword, `{"token":"invalid-token","new_password":"new password 123"}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	assertErrorCode(t, rec, "invalid_token")
+}
+
+func TestResetPassword_MissingFields(t *testing.T) {
+	h := newTestAuthHandler(&fakeStore{}, nil)
+
+	for _, body := range []string{
+		`{"token":"","new_password":"x"}`,
+		`{"token":"abc","new_password":""}`,
+		`{}`,
+	} {
+		rec := postJSON(t, h.ResetPassword, body)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("body=%s: status = %d, want 400", body, rec.Code)
+		}
+		assertErrorCode(t, rec, "missing_fields")
+	}
+}
+
+func TestResetPassword_WeakPassword(t *testing.T) {
+	fs := &fakeStore{
+		getPasswordResetByToken: storage.PasswordReset{
+			ID:        uuid.New(),
+			UserID:    uuid.New(),
+			Token:     "valid-token",
+			ExpiresAt: time.Now().Add(time.Hour),
+		},
+	}
+	h := newTestAuthHandler(fs, nil)
+
+	rec := postJSON(t, h.ResetPassword, `{"token":"valid-token","new_password":"short"}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	assertErrorCode(t, rec, "weak_password")
+}
+
+func TestResetPassword_InvalidJSON(t *testing.T) {
+	h := newTestAuthHandler(&fakeStore{}, nil)
+	rec := postJSON(t, h.ResetPassword, `{not json`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	assertErrorCode(t, rec, "invalid_json")
+}
+
+func TestResetPassword_StoreFailure(t *testing.T) {
+	userID := uuid.New()
+	resetToken := storage.PasswordReset{
+		ID:        uuid.New(),
+		UserID:    userID,
+		Token:     "valid-token",
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+
+	fs := &fakeStore{
+		getPasswordResetByToken: resetToken,
+		updateUserPasswordErr:   errors.New("db down"),
+	}
+	h := newTestAuthHandler(fs, nil)
+
+	rec := postJSON(t, h.ResetPassword, `{"token":"valid-token","new_password":"new password 123"}`)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	assertErrorCode(t, rec, "internal_error")
 }

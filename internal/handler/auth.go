@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/Carlos20052030/bookmarks-api/internal/auth"
 	"github.com/Carlos20052030/bookmarks-api/internal/domain"
+	"github.com/Carlos20052030/bookmarks-api/internal/email"
 	"github.com/Carlos20052030/bookmarks-api/internal/storage"
 	"github.com/google/uuid"
 )
@@ -27,17 +30,24 @@ type Store interface {
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (domain.RefreshToken, error)
 	RevokeRefreshToken(ctx context.Context, id uuid.UUID) error
 	RevokeAllUserTokens(ctx context.Context, userID uuid.UUID) error
+
+	// Password reset methods
+	CreatePasswordReset(ctx context.Context, userID uuid.UUID, token string, expiresAt time.Time) (storage.PasswordReset, error)
+	GetPasswordResetByToken(ctx context.Context, token string) (storage.PasswordReset, error)
+	MarkPasswordResetUsed(ctx context.Context, id uuid.UUID) error
+	UpdateUserPassword(ctx context.Context, userID uuid.UUID, passwordHash string) error
 }
 
 // AuthHandler holds the dependencies for auth endpoints.
 type AuthHandler struct {
-	store     Store
-	jwtSecret []byte
-	logger    *slog.Logger
+	store       Store
+	emailClient *email.ResendClient
+	jwtSecret   []byte
+	logger      *slog.Logger
 }
 
-func NewAuthHandler(store Store, jwtSecret []byte, logger *slog.Logger) *AuthHandler {
-	return &AuthHandler{store: store, jwtSecret: jwtSecret, logger: logger}
+func NewAuthHandler(store Store, emailClient *email.ResendClient, jwtSecret []byte, logger *slog.Logger) *AuthHandler {
+	return &AuthHandler{store: store, emailClient: emailClient, jwtSecret: jwtSecret, logger: logger}
 }
 
 // --- request / response types ---
@@ -336,4 +346,137 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Password Reset ---
+
+const (
+	// PasswordResetTokenBytes is the number of random bytes for the reset token.
+	// 32 bytes = 64 hex chars, 256 bits of entropy.
+	PasswordResetTokenBytes = 32
+	// PasswordResetTokenTTL is the time-to-live for password reset tokens.
+	PasswordResetTokenTTL = 1 * time.Hour
+)
+
+type forgotPasswordRequest struct {
+	Email string `json:"email"`
+}
+
+type resetPasswordRequest struct {
+	Token       string `json:"token"`
+	NewPassword string `json:"new_password"`
+}
+
+// ForgotPassword initiates a password reset. It always returns 200 OK
+// to prevent email enumeration (security best practice).
+func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	var req forgotPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", "Corpo da requisição não é JSON válido")
+		return
+	}
+
+	email := normalizeEmail(req.Email)
+	if !validEmail(email) {
+		// Still return 200 OK to prevent email enumeration
+		writeJSON(w, http.StatusOK, map[string]string{"message": "Se o e-mail existir, enviaremos instruções para redefinir a senha"})
+		return
+	}
+
+	// Check if user exists
+	user, err := h.store.GetUserByEmail(r.Context(), email)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			// User doesn't exist, but we still return 200 OK for security
+			writeJSON(w, http.StatusOK, map[string]string{"message": "Se o e-mail existir, enviaremos instruções para redefinir a senha"})
+			return
+		}
+		h.logger.Error("get user by email", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	// Generate secure random token
+	tokenBytes := make([]byte, PasswordResetTokenBytes)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		h.logger.Error("generate reset token", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+	token := hex.EncodeToString(tokenBytes)
+
+	// Store token with 1-hour expiration
+	expiresAt := time.Now().Add(PasswordResetTokenTTL)
+	if _, err := h.store.CreatePasswordReset(r.Context(), user.ID, token, expiresAt); err != nil {
+		h.logger.Error("create password reset", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	// Send email asynchronously (don't wait for it to complete)
+	if h.emailClient != nil {
+		go func() {
+			ctx := context.Background()
+			if err := h.emailClient.SendPasswordResetEmail(ctx, email, token); err != nil {
+				h.logger.Error("send password reset email", "err", err, "email", email)
+			}
+		}()
+	}
+
+	// Always return 200 OK to prevent email enumeration
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Se o e-mail existir, enviaremos instruções para redefinir a senha"})
+}
+
+// ResetPassword validates the token and updates the user's password.
+func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var req resetPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", "Corpo da requisição não é JSON válido")
+		return
+	}
+
+	if req.Token == "" || req.NewPassword == "" {
+		writeError(w, http.StatusBadRequest, "missing_fields", "token e new_password são obrigatórios")
+		return
+	}
+
+	if len(req.NewPassword) < minPasswordLen {
+		writeError(w, http.StatusBadRequest, "weak_password", "A senha deve ter pelo menos 8 caracteres")
+		return
+	}
+
+	// Validate token
+	reset, err := h.store.GetPasswordResetByToken(r.Context(), req.Token)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusBadRequest, "invalid_token", "Token inválido ou expirado")
+			return
+		}
+		h.logger.Error("get password reset by token", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	// Hash new password
+	hash, err := auth.HashPassword(req.NewPassword)
+	if err != nil {
+		h.logger.Error("hash password", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	// Update user's password
+	if err := h.store.UpdateUserPassword(r.Context(), reset.UserID, hash); err != nil {
+		h.logger.Error("update user password", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "")
+		return
+	}
+
+	// Mark token as used
+	if err := h.store.MarkPasswordResetUsed(r.Context(), reset.ID); err != nil {
+		h.logger.Error("mark password reset used", "err", err)
+		// Don't return error here - password was already updated
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Senha redefinida com sucesso"})
 }

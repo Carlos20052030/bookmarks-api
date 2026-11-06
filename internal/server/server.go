@@ -71,6 +71,14 @@ func New(
 	mux.HandleFunc("POST /auth/refresh", authH.Refresh)
 	mux.HandleFunc("POST /auth/logout", authH.Logout)
 
+	// Password reset routes (public, rate limited by email)
+	rateLimitForgotPasswordIP := middleware.RateLimit(registerLimiter, middleware.IPKey)
+	rateLimitForgotPasswordEmail := middleware.RateLimit(emailLimiter, middleware.EmailKeyFromBody)
+	mux.Handle("POST /auth/forgot-password",
+		rateLimitForgotPasswordIP(rateLimitForgotPasswordEmail(http.HandlerFunc(authH.ForgotPassword))))
+	mux.Handle("POST /auth/reset-password",
+		rateLimitForgotPasswordIP(rateLimitForgotPasswordEmail(http.HandlerFunc(authH.ResetPassword))))
+
 	// Protected: bookmarks.
 	mux.Handle("POST /bookmarks", requireAuth(http.HandlerFunc(bookmarkH.Create)))
 	mux.Handle("GET /bookmarks", requireAuth(http.HandlerFunc(bookmarkH.List)))

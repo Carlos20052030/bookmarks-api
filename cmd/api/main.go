@@ -11,6 +11,7 @@ import (
 	"github.com/Carlos20052030/bookmarks-api/internal/billing/quota"
 	"github.com/Carlos20052030/bookmarks-api/internal/config"
 	"github.com/Carlos20052030/bookmarks-api/internal/dispatcher"
+	"github.com/Carlos20052030/bookmarks-api/internal/email"
 	"github.com/Carlos20052030/bookmarks-api/internal/fetcher"
 	"github.com/Carlos20052030/bookmarks-api/internal/handler"
 	"github.com/Carlos20052030/bookmarks-api/internal/middleware"
@@ -64,7 +65,14 @@ func main() {
 	titleFetcher := fetcher.New(5 * time.Second)
 
 	store := storage.NewStore(db)
-	authHandler := handler.NewAuthHandler(store, cfg.JWT.Secret, slog.Default())
+
+	// Initialize email client (will be nil if RESEND_API_KEY is not set)
+	var emailClient *email.ResendClient
+	if cfg.ResendAPIKey != "" {
+		emailClient = email.NewResendClient(cfg.ResendAPIKey, "")
+	}
+
+	authHandler := handler.NewAuthHandler(store, emailClient, cfg.JWT.Secret, slog.Default())
 	bookmarkHandler := handler.NewBookmarkHandler(store, titleFetcher, dispClient, slog.Default())
 	tagHandler := handler.NewTagHandler(store, slog.Default())
 

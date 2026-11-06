@@ -44,7 +44,7 @@ func TestMain(m *testing.M) {
 func cleanTables(t *testing.T) {
 	t.Helper()
 	_, err := testDB.ExecContext(context.Background(),
-		`TRUNCATE TABLE refresh_tokens, users RESTART IDENTITY CASCADE`)
+		`TRUNCATE TABLE password_resets, refresh_tokens, users RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
