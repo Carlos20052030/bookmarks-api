@@ -11,6 +11,7 @@ import (
 
 	"github.com/Carlos20052030/bookmarks-api/internal/billing/domain"
 	"github.com/stripe/stripe-go/v79"
+	"github.com/stripe/stripe-go/v79/subscription"
 	"github.com/stripe/stripe-go/v79/webhook"
 )
 
@@ -155,9 +156,14 @@ func (h *Handler) handleCheckoutSessionCompleted(event stripe.Event) error {
 	customerID := session.Customer.ID
 	subscriptionID := session.Subscription.ID
 
-	// Get current period end from subscription
-	var periodEnd sql.NullTime
-	_ = periodEnd // We'll update when we have the subscription object
+	// Fetch the subscription to get current_period_end
+	sub, err := subscription.Get(subscriptionID, nil)
+	if err != nil {
+		h.logger.Error("checkout.session.completed: failed to fetch subscription", "error", err, "subscription", subscriptionID)
+		return err
+	}
+
+	periodEnd := time.Unix(sub.CurrentPeriodEnd, 0)
 
 	// Update user by ID (from ClientReferenceID)
 	result, err := h.db.Exec(
@@ -178,7 +184,7 @@ func (h *Handler) handleCheckoutSessionCompleted(event stripe.Event) error {
 		return nil
 	}
 
-	h.logger.Info("checkout completed", "user_id", userID, "customer", customerID, "subscription", subscriptionID)
+	h.logger.Info("checkout completed", "user_id", userID, "customer", customerID, "subscription", subscriptionID, "period_end", periodEnd)
 	return nil
 }
 

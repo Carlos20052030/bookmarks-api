@@ -39,7 +39,7 @@ func (c *ResendClient) SendPasswordResetEmail(ctx context.Context, email, token 
 	resetURL := fmt.Sprintf("https://nuntix.com.br/reset-password?token=%s", token)
 
 	payload := map[string]any{
-		"from":    "Nuntix <onboarding@resend.dev>",
+		"from":    "Nuntix <no-reply@nuntix.com.br>",
 		"to":      []string{email},
 		"subject": "Redefina sua senha no Nuntix",
 		"html": fmt.Sprintf(`
