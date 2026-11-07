@@ -435,9 +435,6 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// DEBUG: Log the received request
-	h.logger.Info("DEBUG: Reset password request", "token_received", req.Token, "token_length", len(req.Token), "password_length", len(req.NewPassword))
-
 	if req.Token == "" || req.NewPassword == "" {
 		writeError(w, http.StatusBadRequest, "missing_fields", "token e new_password são obrigatórios")
 		return
@@ -452,7 +449,6 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	reset, err := h.store.GetPasswordResetByToken(r.Context(), req.Token)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			h.logger.Info("DEBUG: Token not found or invalid", "token", req.Token)
 			writeError(w, http.StatusBadRequest, "invalid_token", "Token inválido ou expirado")
 			return
 		}

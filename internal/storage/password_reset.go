@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,9 +39,6 @@ func (s *Store) CreatePasswordReset(ctx context.Context, userID uuid.UUID, token
 
 // GetPasswordResetByToken returns the password reset token if it's valid (not expired, not used).
 func (s *Store) GetPasswordResetByToken(ctx context.Context, token string) (PasswordReset, error) {
-	// DEBUG: Log the token being queried
-	slog.Info("DEBUG: GetPasswordResetByToken called", "token", token, "token_length", len(token))
-
 	const q = `
 		SELECT id, user_id, token, expires_at, used_at, created_at
 		FROM password_resets
@@ -56,13 +52,10 @@ func (s *Store) GetPasswordResetByToken(ctx context.Context, token string) (Pass
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			slog.Info("DEBUG: Token not found in database (or expired/used)", "token", token)
 			return PasswordReset{}, ErrNotFound
 		}
-		slog.Error("DEBUG: Database error in GetPasswordResetByToken", "err", err)
 		return PasswordReset{}, fmt.Errorf("get password reset by token: %w", err)
 	}
-	slog.Info("DEBUG: Token found and valid", "token", token, "user_id", pr.UserID, "expires_at", pr.ExpiresAt, "used_at", pr.UsedAt)
 	return pr, nil
 }
 
