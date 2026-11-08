@@ -41,6 +41,7 @@ func New(
 	bookmarkH *handler.BookmarkHandler,
 	tagH *handler.TagHandler,
 	apiKeyH *handler.APIKeyHandler,
+	contactH *handler.ContactHandler,
 	store *storage.Store, // <-- store para API Key auth
 	quotaSvc *quota.InMemoryQuotaService,
 	db *sql.DB, // <-- db for webhook handler
@@ -78,6 +79,10 @@ func New(
 		rateLimitForgotPasswordIP(rateLimitForgotPasswordEmail(http.HandlerFunc(authH.ForgotPassword))))
 	mux.Handle("POST /auth/reset-password",
 		rateLimitForgotPasswordIP(rateLimitForgotPasswordEmail(http.HandlerFunc(authH.ResetPassword))))
+
+	// Contact form route (public, rate limited by IP)
+	rateLimitContactIP := middleware.RateLimit(registerLimiter, middleware.IPKey)
+	mux.Handle("POST /contact", rateLimitContactIP(http.HandlerFunc(contactH.Contact)))
 
 	// Protected: bookmarks.
 	mux.Handle("POST /bookmarks", requireAuth(http.HandlerFunc(bookmarkH.Create)))

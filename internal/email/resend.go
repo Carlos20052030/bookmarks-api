@@ -117,3 +117,78 @@ Este link expira em 1 hora. Se você não solicitou esta redefinição, pode ign
 
 	return nil
 }
+
+// SendContactEmail sends a contact form email to the support address.
+func (c *ResendClient) SendContactEmail(ctx context.Context, fromEmail, subject, body string) error {
+	payload := map[string]any{
+		"from":    "Nuntix <no-reply@nuntix.com.br>",
+		"to":      []string{"contato@nuntix.com.br"},
+		"subject": subject,
+		"html": fmt.Sprintf(`
+			<!DOCTYPE html>
+			<html>
+			<head>
+				<meta charset="utf-8">
+				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+			</head>
+			<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+				<div style="background: #f8f9fa; border-radius: 8px; padding: 32px;">
+					<h1 style="color: #1a1a2e; margin-top: 0; font-size: 24px;">Nova mensagem de contato</h1>
+					<p style="font-size: 16px;"><strong>De:</strong> %s</p>
+					<p style="font-size: 16px;"><strong>E-mail:</strong> %s</p>
+					<hr style="border: none; border-top: 1px solid #e0e0e0; margin: 24px 0;">
+					<p style="font-size: 16px; white-space: pre-wrap;">%s</p>
+					<hr style="border: none; border-top: 1px solid #e0e0e0; margin: 24px 0;">
+					<p style="font-size: 12px; color: #999;">— Enviado via formulário de contato do Nuntix</p>
+				</div>
+			</body>
+			</html>
+		`, subject, fromEmail, body),
+		"text": fmt.Sprintf(`
+Nova mensagem de contato
+
+De: %s
+E-mail: %s
+
+%s
+
+— Enviado via formulário de contato do Nuntix
+		`, subject, fromEmail, body),
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal email payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/emails", bytes.NewReader(jsonData))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		var apiErr map[string]string
+		if err := json.Unmarshal(respBody, &apiErr); err == nil {
+			if msg, ok := apiErr["message"]; ok {
+				return errors.New(msg)
+			}
+		}
+		return fmt.Errorf("resend API error: %s", string(respBody))
+	}
+
+	return nil
+}

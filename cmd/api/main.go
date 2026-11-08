@@ -79,6 +79,9 @@ func main() {
 	// Initialize API Keys handler
 	apiKeyHandler := handler.NewAPIKeyHandler(store)
 
+	// Initialize Contact handler
+	contactHandler := handler.NewContactHandler(emailClient, slog.Default())
+
 	// Initialize quota service for billing
 	quotaSvc := quota.NewInMemoryQuotaService()
 
@@ -87,10 +90,11 @@ func main() {
 		authHandler,
 		bookmarkHandler,
 		tagHandler,
-		apiKeyHandler, // Pass the new handler to the server
-		store,         // Pass store for API Key auth
-		quotaSvc,      // Pass quota service for billing
-		db,            // Pass db for webhook handler
+		apiKeyHandler,
+		contactHandler, // Pass the contact handler to the server
+		store,          // Pass store for API Key auth
+		quotaSvc,       // Pass quota service for billing
+		db,             // Pass db for webhook handler
 		cfg.JWT.Secret,
 		loginLimiter,
 		registerLimiter,
