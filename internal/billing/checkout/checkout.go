@@ -70,7 +70,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Create checkout session with user ID as ClientReferenceID
 	sess, err := session.New(&stripe.CheckoutSessionParams{
-		Mode: stripe.String(string(stripe.CheckoutSessionModeSubscription)),
+		Mode:                stripe.String(string(stripe.CheckoutSessionModeSubscription)),
+		AllowPromotionCodes: stripe.Bool(true),
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
 			{
 				Price:    stripe.String(priceID),
