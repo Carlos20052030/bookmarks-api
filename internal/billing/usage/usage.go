@@ -26,10 +26,11 @@ type DBInterface interface {
 
 // UsageResponse represents the JSON response for the usage endpoint
 type UsageResponse struct {
-	Plan      string     `json:"plan"`
-	PeriodEnd string     `json:"period_end"`
-	Requests  UsageLimit `json:"requests"`
-	Webhooks  UsageLimit `json:"webhooks"`
+	Plan                string     `json:"plan"`
+	PeriodEnd           string     `json:"period_end"`
+	SubscriptionEndsAt  string     `json:"subscription_ends_at"`
+	Requests            UsageLimit `json:"requests"`
+	Webhooks            UsageLimit `json:"webhooks"`
 }
 
 // UsageLimit represents a quota limit with used and limit values
@@ -81,8 +82,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Build response
 	resp := UsageResponse{
-		Plan: plan.String(),
-		PeriodEnd: formatPeriodEnd(periodEnd),
+		Plan:               plan.String(),
+		PeriodEnd:          formatPeriodEnd(periodEnd),
+		SubscriptionEndsAt: formatPeriodEnd(periodEnd),
 		Requests: UsageLimit{
 			Used:  usage.RequestCount,
 			Limit: quotas.MaxRequestsPerPeriod,
