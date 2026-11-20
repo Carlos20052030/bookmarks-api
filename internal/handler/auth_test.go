@@ -52,6 +52,13 @@ type fakeStore struct {
 	lastPasswordResetToken    string
 	lastUpdateUserPasswordID  uuid.UUID
 	lastUpdateUserPasswordHash string
+
+	// API Key fields
+	createAPIKeyErr       error
+	lastAPIKeyUserID      uuid.UUID
+	lastAPIKeyName        string
+	lastAPIKeyPrefix      string
+	lastAPIKeyHash        string
 }
 
 func (f *fakeStore) GetUserByEmail(_ context.Context, _ string) (domain.User, error) {
@@ -128,6 +135,24 @@ func (f *fakeStore) UpdateUserPassword(_ context.Context, userID uuid.UUID, hash
 	return f.updateUserPasswordErr
 }
 
+func (f *fakeStore) CreateAPIKey(_ context.Context, userID uuid.UUID, name, keyPrefix, keyHash string) (domain.APIKey, error) {
+	f.lastAPIKeyUserID = userID
+	f.lastAPIKeyName = name
+	f.lastAPIKeyPrefix = keyPrefix
+	f.lastAPIKeyHash = keyHash
+	if f.createAPIKeyErr != nil {
+		return domain.APIKey{}, f.createAPIKeyErr
+	}
+	return domain.APIKey{
+		ID:        uuid.New(),
+		UserID:    userID,
+		Name:      name,
+		KeyPrefix: keyPrefix,
+		KeyHash:   keyHash,
+		CreatedAt: time.Now(),
+	}, nil
+}
+
 func newTestAuthHandler(fs *fakeStore, emailClient *email.ResendClient) *AuthHandler {
 	return NewAuthHandler(fs, emailClient, testSecret, discardLogger())
 }
@@ -186,6 +211,19 @@ func TestRegister_Success(t *testing.T) {
 	}
 	if fs.lastRefreshTokenUserID != resp.User.ID {
 		t.Fatal("refresh token was not bound to the created user")
+	}
+	// Verify that a default API key was created for the new user
+	if fs.lastAPIKeyUserID != resp.User.ID {
+		t.Fatal("default API key was not created for the new user")
+	}
+	if fs.lastAPIKeyName != "Default Key" {
+		t.Fatalf("API key name = %q, want 'Default Key'", fs.lastAPIKeyName)
+	}
+	if fs.lastAPIKeyPrefix == "" {
+		t.Fatal("API key prefix is empty")
+	}
+	if fs.lastAPIKeyHash == "" {
+		t.Fatal("API key hash is empty")
 	}
 }
 
@@ -250,6 +288,29 @@ func TestRegister_RefreshTokenFailure(t *testing.T) {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 	assertErrorCode(t, rec, "internal_error")
+}
+
+func TestRegister_APIKeyCreationFailure(t *testing.T) {
+	// Registration should succeed even if API key creation fails
+	fs := &fakeStore{createAPIKeyErr: errors.New("db down")}
+	h := newTestAuthHandler(fs, nil)
+	rec := postJSON(t, h.Register, `{"email":"a@b.com","password":"longenough"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (registration should succeed even if API key creation fails)", rec.Code)
+	}
+
+	var resp authResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("response not JSON: %v", err)
+	}
+	if resp.AccessToken == "" || resp.RefreshToken == "" {
+		t.Fatal("tokens are empty")
+	}
+	// API key creation was attempted but failed
+	if fs.lastAPIKeyUserID == uuid.Nil {
+		t.Fatal("API key creation was not attempted")
+	}
 }
 
 // --- Testes de Login ---

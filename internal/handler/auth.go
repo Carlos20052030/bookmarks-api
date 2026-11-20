@@ -36,6 +36,9 @@ type Store interface {
 	GetPasswordResetByToken(ctx context.Context, token string) (storage.PasswordReset, error)
 	MarkPasswordResetUsed(ctx context.Context, id uuid.UUID) error
 	UpdateUserPassword(ctx context.Context, userID uuid.UUID, passwordHash string) error
+
+	// API Key methods
+	CreateAPIKey(ctx context.Context, userID uuid.UUID, name, keyPrefix, keyHash string) (domain.APIKey, error)
 }
 
 // AuthHandler holds the dependencies for auth endpoints.
@@ -127,6 +130,19 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("create user", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "")
 		return
+	}
+
+	// Generate a default API key for the new user
+	_, keyPrefix, keyHash, err := GenerateRandomKey()
+	if err != nil {
+		h.logger.Error("generate default api key", "err", err)
+		// Don't fail registration if API key generation fails; log and continue
+	} else {
+		_, err = h.store.CreateAPIKey(r.Context(), user.ID, "Default Key", keyPrefix, keyHash)
+		if err != nil {
+			h.logger.Error("create default api key", "err", err)
+			// Don't fail registration if API key creation fails; log and continue
+		}
 	}
 
 	accessToken, refreshToken, err := h.issueTokens(r.Context(), user.ID)
