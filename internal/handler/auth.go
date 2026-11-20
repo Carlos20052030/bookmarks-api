@@ -72,6 +72,7 @@ type authResponse struct {
 	RefreshToken string       `json:"refresh_token"`
 	TokenType    string       `json:"token_type"`
 	ExpiresIn    int          `json:"expires_in"`
+	RawAPIKey    string       `json:"raw_api_key,omitempty"`
 }
 
 // --- helpers ---
@@ -133,15 +134,18 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate a default API key for the new user
-	_, keyPrefix, keyHash, err := GenerateRandomKey()
+	var rawAPIKey string
+	rawKey, keyPrefix, keyHash, err := GenerateRandomKey()
 	if err != nil {
 		h.logger.Error("generate default api key", "err", err)
 		// Don't fail registration if API key generation fails; log and continue
 	} else {
+		rawAPIKey = rawKey
 		_, err = h.store.CreateAPIKey(r.Context(), user.ID, "Default Key", keyPrefix, keyHash)
 		if err != nil {
 			h.logger.Error("create default api key", "err", err)
 			// Don't fail registration if API key creation fails; log and continue
+			rawAPIKey = "" // Don't return raw key if storage failed
 		}
 	}
 
@@ -153,15 +157,12 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, authResponse{
-		User: userResponse{
-			ID:        user.ID,
-			Email:     user.Email,
-			CreatedAt: user.CreatedAt,
-		},
+		User:         userResponse{ID: user.ID, Email: user.Email, CreatedAt: user.CreatedAt},
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		TokenType:    "Bearer",
 		ExpiresIn:    int(auth.AccessTokenTTL.Seconds()),
+		RawAPIKey:    rawAPIKey,
 	})
 }
 

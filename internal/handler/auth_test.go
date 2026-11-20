@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -225,6 +226,13 @@ func TestRegister_Success(t *testing.T) {
 	if fs.lastAPIKeyHash == "" {
 		t.Fatal("API key hash is empty")
 	}
+	// Verify that the raw API key is returned in the response
+	if resp.RawAPIKey == "" {
+		t.Fatal("raw_api_key is empty in registration response")
+	}
+	if !strings.HasPrefix(resp.RawAPIKey, "nuntix_live_") {
+		t.Fatalf("raw_api_key has invalid prefix: %q", resp.RawAPIKey)
+	}
 }
 
 func TestRegister_InvalidJSON(t *testing.T) {
@@ -343,6 +351,10 @@ func TestLogin_Success(t *testing.T) {
 	}
 	if resp.User.Email != "alice@example.com" {
 		t.Fatalf("email = %q", resp.User.Email)
+	}
+	// Login should NOT return the raw API key
+	if resp.RawAPIKey != "" {
+		t.Fatalf("login should not return raw_api_key, got %q", resp.RawAPIKey)
 	}
 }
 
